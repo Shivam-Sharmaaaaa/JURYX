@@ -209,11 +209,14 @@ def get_scoped_law(agent_key: str, case_type: str) -> str:
     Falls back to agent's primary_acts if intersection with case_type acts is empty.
     For lead_jurist, injects all acts from LEGAL_REFERENCE_BANK.
     """
+    if not case_type:
+        case_type = "general"
+
     if agent_key == "lead_jurist":
         acts = list(LEGAL_REFERENCE_BANK.keys())
     else:
         agent_primary = AGENTS.get(agent_key, {}).get("primary_acts", list(LEGAL_REFERENCE_BANK.keys()))
-        case_acts = CASE_TYPE_ACTS.get(case_type, CASE_TYPE_ACTS["general"])
+        case_acts = CASE_TYPE_ACTS.get(case_type) or CASE_TYPE_ACTS["general"]
         case_acts_set = set(case_acts)
 
         # Intersection preserving order of primary_acts
@@ -261,12 +264,15 @@ def format_round1_transcript(transcript: dict) -> str:
     Formats parsed Round 1 JSON opinions from all primary jurors into a standard string block.
     Inserts a response unavailable placeholder for missing juror keys.
     """
+    if not transcript or not isinstance(transcript, dict):
+        transcript = {}
+
     blocks = []
     round1_agents = ["analyst", "empath", "jurist", "skeptic"]
     for key in round1_agents:
         display_name = AGENTS[key]["name"]
         header = display_name.upper()
-        if key not in transcript or not transcript[key]:
+        if key not in transcript or not transcript[key] or not isinstance(transcript[key], dict):
             blocks.append(f"[{header}] — Response unavailable")
             continue
 
@@ -274,13 +280,18 @@ def format_round1_transcript(transcript: dict) -> str:
         stance = data.get("stance", "")
         conf = data.get("confidence", "")
         if conf != "" and conf is not None:
+            if isinstance(conf, float):
+                if 0.0 <= conf <= 1.0:
+                    conf = int(round(conf * 100))
+                else:
+                    conf = int(round(conf))
             conf_str = f"{conf}%" if not str(conf).endswith("%") else str(conf)
         else:
             conf_str = ""
         rationale = data.get("rationale", "")
-        refs = data.get("statutory_references", [])
+        refs = data.get("statutory_references") or []
         if refs:
-            refs_str = ", ".join(refs)
+            refs_str = ", ".join(str(r) for r in refs)
         else:
             refs_str = "None"
 
@@ -301,12 +312,15 @@ def format_round2_transcript(transcript: dict) -> str:
     Formats parsed Round 2 JSON rebuttals and revised stances into a standard string block.
     Inserts a response unavailable placeholder for missing juror keys.
     """
+    if not transcript or not isinstance(transcript, dict):
+        transcript = {}
+
     blocks = []
     round2_agents = ["analyst", "empath", "jurist", "skeptic"]
     for key in round2_agents:
         display_name = AGENTS[key]["name"]
         header = display_name.upper()
-        if key not in transcript or not transcript[key]:
+        if key not in transcript or not transcript[key] or not isinstance(transcript[key], dict):
             blocks.append(f"[{header}] — Response unavailable")
             continue
 
@@ -314,11 +328,16 @@ def format_round2_transcript(transcript: dict) -> str:
         revised_stance = data.get("revised_stance", "")
         conf = data.get("revised_confidence", "")
         if conf != "" and conf is not None:
+            if isinstance(conf, float):
+                if 0.0 <= conf <= 1.0:
+                    conf = int(round(conf * 100))
+                else:
+                    conf = int(round(conf))
             conf_str = f"{conf}%" if not str(conf).endswith("%") else str(conf)
         else:
             conf_str = ""
         revised_rationale = data.get("revised_rationale", "")
-        rebuttals = data.get("rebuttals", [])
+        rebuttals = data.get("rebuttals") or []
 
         lines = [
             f"[{header}]",
@@ -330,10 +349,14 @@ def format_round2_transcript(transcript: dict) -> str:
         if rebuttals:
             lines.append("Rebuttals:")
             for r in rebuttals:
-                target = r.get("target_agent", "")
-                challenge = r.get("challenge", "")
-                counter = r.get("counter_point", "")
-                lines.append(f"  -> To {target}: {challenge} | Counter: {counter}")
+                if isinstance(r, dict):
+                    raw_target = r.get("target_agent", "")
+                    target = AGENTS.get(raw_target, {}).get("name", raw_target)
+                    challenge = r.get("challenge", "")
+                    counter = r.get("counter_point", "")
+                    lines.append(f"  -> To {target}: {challenge} | Counter: {counter}")
+                else:
+                    lines.append(f"  -> {r}")
         else:
             lines.append("Rebuttals: No rebuttals submitted.")
 
@@ -353,6 +376,9 @@ def build_round1_prompt(agent_key: str, case_facts: str, case_type: str = "gener
     if agent_key == "lead_jurist":
         print("Warning: build_round1_prompt called with lead_jurist — skipping.")
         return ""
+
+    case_facts = case_facts or ""
+    case_type = case_type or "general"
 
     agent = AGENTS.get(agent_key, {})
     name = agent.get("name", "")
@@ -432,6 +458,10 @@ def build_round2_prompt(
         print("Warning: build_round2_prompt called with lead_jurist — skipping.")
         return ""
 
+    case_facts = case_facts or ""
+    round1_transcript = round1_transcript or {}
+    case_type = case_type or "general"
+
     agent = AGENTS.get(agent_key, {})
     name = agent.get("name", "")
     role = agent.get("role", "")
@@ -505,6 +535,10 @@ def build_round3_prompt(
     Builds the Round 3 synthesis and final advisory verdict prompt for The Lead Jurist.
     Synthesizes facts, legal reference bank, precedents, Round 1 opinions, and Round 2 rebuttals.
     """
+    case_facts = case_facts or ""
+    round1_transcript = round1_transcript or {}
+    round2_transcript = round2_transcript or {}
+    case_type = case_type or "general"
     persona_block = (
         "You are The Lead Jurist, Presiding Synthesis Bench of the JuryX advisory panel.\n"
         "You have been silent during Rounds 1 and 2.\n"
