@@ -1,12 +1,274 @@
-﻿<!doctype html>
+
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JuryX - AI Advisory Jury Panel</title>
-  </head>
-  <body class="bg-slate-950 text-slate-100 min-h-screen">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JuryX | AI Jury Bench</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <a class="logo" href="#home" aria-label="JuryX home">
+      <span class="scale" aria-hidden="true">&#9878;&#xFE0E;</span>
+      <span class="word">JURY</span><span class="x">X</span>
+    </a>
+    <p class="tagline">AI Jury Bench · Advisory only</p>
+  </div>
+
+  <nav class="nav" aria-label="Main">
+    <div class="nav-inner">
+      <a href="#home">Bench</a>
+      <a href="#about">About</a>
+      <a href="#jurors">Agents</a>
+      <a href="#safety">Safeguards</a>
+    </div>
+  </nav>
+</header>
+
+<section class="hero" id="home">
+
+  <div class="head-panel">
+
+    <div class="head-top">
+      <div class="head-title">
+        <span class="head-icon" aria-hidden="true">&#9878;&#xFE0E;</span>
+        <div>
+          <h2>Head Agent <span class="demo-badge">Frontend demo</span></h2>
+          <p id="headStatus">Pick a case, then start</p>
+        </div>
+      </div>
+      <button id="startBtn">Start Deliberation</button>
+    </div>
+
+    <div class="cases" id="cases" role="group" aria-label="Choose a case"></div>
+
+    <!-- Custom case input -->
+    <div class="case-input">
+      <h3 class="mini-title">Case file input</h3>
+
+      <label for="customTitle">Case title</label>
+      <input id="customTitle" type="text" placeholder="Enter case title">
+
+      <label for="customType">Applicable law / case type</label>
+      <input id="customType" type="text" placeholder="e.g. BNS Section 303(2)">
+
+      <label for="customFir">FIR / complaint summary</label>
+      <textarea id="customFir" rows="4"
+        placeholder="Enter the FIR or complaint details..."></textarea>
+
+      <label for="customEvidence">Evidence and documents</label>
+      <textarea id="customEvidence" rows="4"
+        placeholder="Enter evidence, witness statements, CCTV details, documents, etc."></textarea>
+
+      <button class="jbtn custom-load" id="loadCustomBtn" type="button">
+        Use Custom Case
+      </button>
+    </div>
+
+    <div class="casefile" id="caseFile"></div>
+
+    <ol class="stepper" id="steps">
+      <li>Case loaded</li>
+      <li>Round 1</li>
+      <li>Round 2</li>
+      <li>Head review</li>
+      <li>Advisory ready</li>
+    </ol>
+
+    <p class="timer" id="timer"></p>
+
+    <div class="bench" id="bench" aria-label="The four agents">
+      <div class="av" data-j="Analyst"><b>A</b><span>Analyst</span></div>
+      <div class="av" data-j="Empath"><b>E</b><span>Empath</span></div>
+      <div class="av" data-j="Jurist"><b>J</b><span>Jurist</span></div>
+      <div class="av" data-j="Skeptic"><b>S</b><span>Skeptic</span></div>
+    </div>
+
+    <div class="round-label" id="roundLabel">Awaiting deliberation</div>
+
+    <div class="agents-box">
+      <span class="box-label">4 Agents · Live debate</span>
+      <div id="chat" aria-live="polite"></div>
+    </div>
+
+    <div class="head-review">
+
+      <div class="verdict">
+        <p id="voteText">Support: 0 | Oppose: 0 | Abstain: 0</p>
+        <div class="dots" id="dots" aria-hidden="true">
+          <i></i><i></i><i></i><i></i>
+        </div>
+        <div class="bar"><div id="barFill"></div></div>
+      </div>
+
+      <div class="review-grid">
+
+        <div>
+          <h3 class="mini-title">Head Agent · Statement checks</h3>
+          <ul id="checks"></ul>
+        </div>
+
+        <div>
+          <h3 class="mini-title">Final advisory</h3>
+          <div id="result" aria-live="polite"></div>
+        </div>
+
+      </div>
+
+      <div class="consensus-panel">
+        <span class="mini-title">Bench consensus</span>
+        <strong id="consensus">Awaiting deliberation</strong>
+        <p id="consensusText">The final consensus will appear here.</p>
+      </div>
+
+    </div>
+
+    <!-- Magistrate review -->
+    <div class="judge" id="judge" hidden>
+      <h3 class="mini-title">Magistrate review · Human decision required</h3>
+
+      <p class="judge-intro">
+        The advisory is not a judicial verdict. The magistrate retains
+        complete authority over the final decision.
+      </p>
+
+      <label for="notes">Magistrate's notes</label>
+      <textarea id="notes" rows="3"
+        placeholder="Explain the reason for approval, modification or rejection..."></textarea>
+
+      <div class="jrow">
+        <button class="jbtn" data-d="Approved">Approve</button>
+        <button class="jbtn" data-d="Modified">Modify</button>
+        <button class="jbtn" data-d="Rejected">Reject</button>
+        <button class="jbtn dl" id="dlBtn">Download JSON Audit</button>
+      </div>
+
+      <p id="judgeMsg" aria-live="polite"></p>
+    </div>
+
+  </div>
+
+  <aside class="justice-box">
+    <div class="glyph" aria-hidden="true">&#9878;&#xFE0E;</div>
+    <img src="Lady_Justice.webp"
+      alt="Bronze statue of Lady Justice holding scales and a sword"
+      onerror="this.style.display='none'">
+  </aside>
+
+  <a class="scroll-hint" href="#about">Scroll for details ↓</a>
+</section>
+
+<section class="info" id="about">
+  <div class="info-inner">
+
+    <div class="block">
+      <h2 class="section-title">A first pass for routine cases</h2>
+      <p class="lead">
+        JuryX is a decision-support prototype for Indian summary courts.
+        Four jurors examine a case through different perspectives, debate
+        over two rounds and produce an advisory recommendation.
+        A human magistrate always makes the final decision.
+      </p>
+    </div>
+
+    <div class="block">
+      <h2 class="section-title">How it works</h2>
+      <div class="grid steps">
+        <div class="card step">
+          <h3>Case loaded</h3>
+          <p>Choose a preset case or enter your own FIR and evidence.</p>
+        </div>
+        <div class="card step">
+          <h3>Round 1 · Initial votes</h3>
+          <p>All four jurors independently examine the case and record their initial positions.</p>
+        </div>
+        <div class="card step">
+          <h3>Round 2 · Rebuttals</h3>
+          <p>Jurors review opposing arguments and record their final positions.</p>
+        </div>
+        <div class="card step">
+          <h3>Head Agent review</h3>
+          <p>The Head Agent checks the statements, identifies gaps and prepares an advisory.</p>
+        </div>
+        <div class="card step">
+          <h3>Magistrate decides</h3>
+          <p>The magistrate approves, modifies or rejects the advisory and can download an audit report.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="block" id="jurors">
+      <h2 class="section-title">Four lenses and one reviewer</h2>
+      <div class="grid">
+        <div class="card j-a">
+          <h3>The Analyst</h3>
+          <p>Facts, evidence, timelines and consistency.</p>
+        </div>
+        <div class="card j-e">
+          <h3>The Empath</h3>
+          <p>Intent, circumstances and humanitarian context.</p>
+        </div>
+        <div class="card j-j">
+          <h3>The Jurist</h3>
+          <p>Applicable Indian law, statutory ingredients and procedure.</p>
+        </div>
+        <div class="card j-s">
+          <h3>The Skeptic</h3>
+          <p>Weak evidence, missing proof and contradictions.</p>
+        </div>
+        <div class="card j-h">
+          <h3>The Head Agent</h3>
+          <p>Reviews all four jurors, flags issues and prepares the advisory. It does not decide the case.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="block" id="safety">
+      <h2 class="section-title">Built for human oversight</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Advisory only</h3>
+          <p>The magistrate keeps full authority over every outcome.</p>
+        </div>
+        <div class="card">
+          <h3>Two-round debate</h3>
+          <p>Initial positions and rebuttals are recorded separately.</p>
+        </div>
+        <div class="card">
+          <h3>Audit report</h3>
+          <p>Case details, votes, debate, review flags and magistrate decision are exportable.</p>
+        </div>
+        <div class="card">
+          <h3>Summary offences</h3>
+          <p>Designed as a prototype for routine summary-case workflows.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>JuryX · Hackathon prototype · Simulated frontend data · Advisory only</footer>
+</section>
+
+<!-- Shared spotlight popup for jurors and Head Agent -->
+<div class="spot" id="spot" hidden>
+  <div class="spot-card" id="spotCard"
+    role="dialog" aria-label="Agent statement" aria-modal="true">
+
+    <b class="spot-av" id="spotAv" aria-hidden="true"></b>
+    <p class="spot-name" id="spotName"></p>
+    <h3 class="spot-verdict" id="spotVerdict" hidden></h3>
+    <p class="spot-msg" id="spotMsg" aria-live="polite"></p>
+    <p class="spot-hint">Click anywhere or press Esc to skip</p>
+
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="script.js"></script>
+</body>
 </html>
