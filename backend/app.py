@@ -1,83 +1,577 @@
-﻿import os
+﻿"""
+JuryX — Backend Server & Multi-Agent Deliberation Pipeline
+
+1. What this file does:
+   Flask HTTP server for JuryX, an AI-assisted multi-agent advisory jury panel
+   for Indian summary trial offences (Section 138 NI Act, minor BNS/IPC offences,
+   petty theft, traffic violations, and municipal public nuisance). It handles HTTP
+   routing, invokes the Google Gemini API using google-genai SDK, orchestrates
+   the 3-round deliberation pipeline, and returns structured JSON to the frontend.
+
+2. Routes exposed:
+   GET  /health          — Server health and configuration status (alias: /api/health)
+   GET  /api/health      — Route alias for /health
+   GET  /api/cases       — Returns standard Indian summary test cases (from agents.py)
+   POST /api/deliberate  — 3-round multi-agent AI deliberation pipeline (Rounds 1 & 2 parallel)
+   POST /api/eligibility — Deterministic rule-based Indian law pre-screening (zero AI calls)
+
+3. Pipeline sequence:
+   Round 1: 4 agents executed in parallel (ThreadPoolExecutor, max_workers=4)
+   Round 2: 4 agents executed in parallel (ThreadPoolExecutor, max_workers=4) with Round 1 context
+   Round 3: Head Jurist single call synthesizing consensus and advisory recommendations
+   On any exception: fallback_demo.json is returned cleanly with source="fallback"
+
+4. Frontend contract:
+   Always receives HTTP 200 (even on errors or fallback).
+   The frontend checks the "source" field: "live" vs "fallback".
+   "fallback_reason" field is present when source is "fallback".
+
+5. Environment variables required:
+   GEMINI_API_KEY — Google Gemini API key (required for live deliberation mode)
+   GEMINI_MODEL   — Target Gemini model name, default: gemini-3.5-flash-lite
+   PORT           — Flask server port, default: 5000
+   FLASK_DEBUG    — Set to "true" for debug mode, default: false
+"""
+
+import os
 import json
+import time
+import concurrent.futures
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Check 1: Google GenAI SDK imports (no deprecated google.generativeai)
+from google import genai
+from google.genai import types
 
+# Check 2 & 3: Safe Module Contract from agents.py
+from agents import JURORS, HEAD_JUROR, SAMPLE_CASES
+
+try:
+    from agents import (
+        build_round1_prompt,
+        build_round2_prompt,
+        build_round3_prompt
+    )
+except ImportError:
+    # Built-in default prompt builders using JURORS and HEAD_JUROR
+    _JUROR_BY_ID = {j["id"]: j for j in JURORS}
+    _JUROR_BY_ID["lead_jurist"] = HEAD_JUROR
+
+    def _format_r1_text(round1_transcript: dict) -> str:
+        lines = []
+        for k, v in round1_transcript.items():
+            juror = _JUROR_BY_ID.get(k, {})
+            name = juror.get("name", k.capitalize())
+            stance = v.get("stance", "N/A")
+            conf = v.get("confidence", 0)
+            rationale = v.get("rationale", "")
+            lines.append(f"- {name} (Stance: {stance}, Confidence: {conf}): {rationale}")
+        return "\n".join(lines) if lines else "No prior Round 1 opinions."
+
+    def _format_r2_text(round2_transcript: dict) -> str:
+        lines = []
+        for k, v in round2_transcript.items():
+            juror = _JUROR_BY_ID.get(k, {})
+            name = juror.get("name", k.capitalize())
+            rev_stance = v.get("revised_stance", "N/A")
+            rationale = v.get("revised_rationale", "")
+            lines.append(f"- {name} (Revised Stance: {rev_stance}): {rationale}")
+        return "\n".join(lines) if lines else "No prior Round 2 rebuttals."
+
+    def build_round1_prompt(agent_id: str, case_facts: str, case_type: str) -> str:
+        juror = _JUROR_BY_ID.get(agent_id)
+        if not juror:
+            return ""
+        return (
+            f"{juror['system_prompt']}\n\n"
+            f"CASE TYPE: {case_type}\n"
+            f"CASE FACTS:\n{case_facts}\n\n"
+            "TASK:\n"
+            "Provide your initial evaluation strictly under 75 words.\n"
+            "Return ONLY valid JSON matching this schema:\n"
+            "{\n"
+            '  "stance": "liable" | "not_liable" | "compoundable" | "needs_more_evidence",\n'
+            '  "confidence": <float between 0.0 and 1.0>,\n'
+            '  "rationale": "<concise analysis under 70 words>",\n'
+            '  "statutory_references": ["<statute or section e.g. NI Act Sec 138>"]\n'
+            "}"
+        )
+
+    def build_round2_prompt(agent_id: str, case_facts: str, round1_transcript: dict, case_type: str) -> str:
+        juror = _JUROR_BY_ID.get(agent_id)
+        if not juror:
+            return ""
+        r1_text = _format_r1_text(round1_transcript)
+        return (
+            f"{juror['system_prompt']}\n\n"
+            f"CASE TYPE: {case_type}\n"
+            f"CASE FACTS:\n{case_facts}\n\n"
+            f"ROUND 1 TRANSCRIPT:\n{r1_text}\n\n"
+            "TASK:\n"
+            "Review your peers' initial stances. Point out evidentiary gaps, statutory nuances, or mitigating realities.\n"
+            "State whether your stance shifted. Keep response strictly under 85 words.\n"
+            "Return ONLY valid JSON matching this schema:\n"
+            "{\n"
+            '  "rebuttals": [\n'
+            "    {\n"
+            '      "target_juror": "analyst" | "empath" | "jurist" | "skeptic",\n'
+            '      "argument": "<concise challenge or concurrence under 35 words>"\n'
+            "    }\n"
+            "  ],\n"
+            '  "revised_stance": "liable" | "not_liable" | "compoundable" | "needs_more_evidence",\n'
+            '  "revised_confidence": <float between 0.0 and 1.0>,\n'
+            '  "revised_rationale": "<concise revised reasoning under 75 words>"\n'
+            "}"
+        )
+
+    def build_round3_prompt(case_facts: str, round1_transcript: dict, round2_transcript: dict, case_type: str) -> str:
+        r1_text = _format_r1_text(round1_transcript)
+        r2_text = _format_r2_text(round2_transcript)
+        return (
+            f"{HEAD_JUROR['system_prompt']}\n\n"
+            f"CASE TYPE: {case_type}\n"
+            f"CASE FACTS:\n{case_facts}\n\n"
+            f"ROUND 1 INITIAL DELIBERATION:\n{r1_text}\n\n"
+            f"ROUND 2 REBUTTALS & CONVERSIONS:\n{r2_text}\n\n"
+            "TASK:\n"
+            "Synthesize the panel debate into an actionable advisory opinion for the Judicial Magistrate.\n"
+            "Keep response strictly under 170 words.\n"
+            "Return ONLY valid JSON matching this schema:\n"
+            "{\n"
+            '  "verdict": "guilty" | "not_guilty" | "compounding_recommended" | "lok_adalat_referral" | "needs_more_evidence",\n'
+            '  "consensus_level": "unanimous" | "majority_3_1" | "split_2_2",\n'
+            '  "advisory_note": "<balanced summary of consensus, friction, and legal basis under 100 words>",\n'
+            '  "remedy_or_sentencing": "<specific restitution, compounding terms, or statutory disposition under 60 words>"\n'
+            "}"
+        )
+
+# ── Setup ──────────────────────────────────────────────────────────────────────
+dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path)
+
+# Flask app initialization with CORS enabled
 app = Flask(__name__)
 CORS(app)
 
-# Initialize Google GenAI client (SDK: google-genai)
-genai_client = None
+# Gemini Client and Model setup
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+# Fallback path for live pitch resilience
+FALLBACK_PATH = os.path.join(os.path.dirname(__file__), "fallback_demo.json")
+
+# Item 1: Prevent JSON Truncation (600 tokens for jurors, 900 for lead)
+JUROR_CONFIG = types.GenerateContentConfig(
+    response_mime_type="application/json",
+    max_output_tokens=600,
+    temperature=0.2
+)
+
+LEAD_CONFIG = types.GenerateContentConfig(
+    response_mime_type="application/json",
+    max_output_tokens=900,
+    temperature=0.2
+)
+
+
+def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries: int = 2) -> dict:
+    """
+    Calls the Gemini API enforcing JSON output via response_mime_type="application/json".
+    Includes exponential backoff retry for rate-limiting resilience.
+    """
+    if client is None:
+        raise RuntimeError("No API key configured — set GEMINI_API_KEY in .env")
+
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=config or JUROR_CONFIG
+            )
+            raw = response.text.strip() if response and response.text else ""
+            if not raw:
+                raise ValueError("Empty response text from Gemini API")
+
+            # Defensive strip of markdown code fences if present
+            cleaned = raw
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            elif cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+
+            return json.loads(cleaned.strip())
+
+        except Exception as e:
+            last_error = e
+            err_str = str(e).lower()
+            if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource" in err_str:
+                wait_time = 2 ** attempt
+                print(f"[JuryX] Rate limit encountered (attempt {attempt + 1}/{retries + 1}), backing off {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise e
+
+    raise last_error if last_error else RuntimeError("Gemini call failed")
+
+
+def load_fallback() -> dict:
+    """
+    Loads fallback_demo.json for resilient hackathon demonstrations.
+    If missing or corrupted, returns a minimal hardcoded dictionary.
+    Always ensures source="fallback".
+    """
     try:
-        from google import genai
-        genai_client = genai.Client(api_key=GEMINI_API_KEY)
+        if os.path.exists(FALLBACK_PATH):
+            with open(FALLBACK_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                data["source"] = "fallback"
+                return data
     except Exception as e:
-        print(f"Warning: Failed to initialize Google GenAI Client: {e}")
+        print(f"[JuryX] Error reading fallback file: {e}")
 
-def load_fallback_data():
-    """Loads fallback demo JSON for resilient hackathon demonstrations."""
-    fallback_path = os.path.join(os.path.dirname(__file__), "fallback_demo.json")
-    if os.path.exists(fallback_path):
-        with open(fallback_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"error": "Fallback file not found"}
+    return {
+        "source": "fallback",
+        "error": "Fallback file missing or corrupted",
+        "round1": {},
+        "round2": {},
+        "round3": {
+            "verdict": "needs_more_evidence",
+            "advisory_note": "System fallback activated. Please retry."
+        }
+    }
 
+
+# Item 2: Track failures and trigger fallback if ALL jurors fail in Round 1
+def run_round1_parallel(case_facts: str, case_type: str) -> dict:
+    """
+    Runs all 4 Round 1 agents IN PARALLEL using ThreadPoolExecutor.
+    If ALL jurors fail, raises RuntimeError to trigger global fallback cleanly.
+    """
+    round1_transcript = {}
+    failed_count = 0
+    total_agents = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_agent = {}
+        for juror in JURORS:
+            agent_id = juror["id"]
+            prompt = build_round1_prompt(agent_id, case_facts, case_type)
+            if not prompt:
+                continue
+            total_agents += 1
+            future = executor.submit(call_gemini, prompt, JUROR_CONFIG)
+            future_to_agent[future] = agent_id
+
+        for future in concurrent.futures.as_completed(future_to_agent):
+            agent_id = future_to_agent[future]
+            try:
+                round1_transcript[agent_id] = future.result(timeout=15)
+            except Exception as e:
+                failed_count += 1
+                print(f"[JuryX] Juror '{agent_id}' Round 1 failed: {e}")
+                round1_transcript[agent_id] = {
+                    "stance": "needs_more_evidence",
+                    "confidence": 0,
+                    "rationale": "Agent response unavailable.",
+                    "statutory_references": []
+                }
+
+    if total_agents > 0 and failed_count >= total_agents:
+        raise RuntimeError("All jurors failed in Round 1 deliberation")
+
+    return round1_transcript
+
+
+# Item 2: Track failures and trigger fallback if ALL jurors fail in Round 2
+def run_round2_parallel(case_facts: str, case_type: str, round1_transcript: dict) -> dict:
+    """
+    Runs all 4 Round 2 agents IN PARALLEL using ThreadPoolExecutor.
+    If ALL jurors fail, raises RuntimeError to trigger global fallback cleanly.
+    """
+    round2_transcript = {}
+    failed_count = 0
+    total_agents = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_agent = {}
+        for juror in JURORS:
+            agent_id = juror["id"]
+            prompt = build_round2_prompt(agent_id, case_facts, round1_transcript, case_type)
+            if not prompt:
+                continue
+            total_agents += 1
+            future = executor.submit(call_gemini, prompt, JUROR_CONFIG)
+            future_to_agent[future] = agent_id
+
+        for future in concurrent.futures.as_completed(future_to_agent):
+            agent_id = future_to_agent[future]
+            try:
+                round2_transcript[agent_id] = future.result(timeout=15)
+            except Exception as e:
+                failed_count += 1
+                print(f"[JuryX] Juror '{agent_id}' Round 2 failed: {e}")
+                round2_transcript[agent_id] = {
+                    "rebuttals": [],
+                    "revised_stance": "needs_more_evidence",
+                    "revised_confidence": 0,
+                    "revised_rationale": "Agent response unavailable."
+                }
+
+    if total_agents > 0 and failed_count >= total_agents:
+        raise RuntimeError("All jurors failed in Round 2 deliberation")
+
+    return round2_transcript
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ROUTES
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Item 4: Support both /health and /api/health
 @app.route("/health", methods=["GET"])
-def health_check():
-    """Health check endpoint to verify backend status."""
+@app.route("/api/health", methods=["GET"])
+def health():
+    """Returns server and configuration health status."""
     return jsonify({
-        "status": "healthy",
-        "service": "JuryX Backend",
-        "genai_configured": genai_client is not None,
-        "model": GEMINI_MODEL
+        "status": "ok",
+        "api_key_set": bool(GEMINI_API_KEY),
+        "model": GEMINI_MODEL,
+        "jurors_count": len(JURORS),
+        "head_juror": HEAD_JUROR.get("name"),
+        "fallback_available": os.path.exists(FALLBACK_PATH)
     }), 200
+
+
+@app.route("/api/cases", methods=["GET"])
+def get_cases():
+    """Returns standard Indian summary test cases loaded from agents.py."""
+    return jsonify(SAMPLE_CASES), 200
+
 
 @app.route("/api/deliberate", methods=["POST"])
 def deliberate():
     """
     Main deliberation endpoint:
-    - Round 1: 4 Jurors initial opinions (Analyst, Empath, Jurist, Skeptic)
-    - Round 2: 4 Jurors rebuttals based on Round 1
-    - Round 3: Lead Jurist synthesis & advisory verdict
-    Falls back to fallback_demo.json if API key is unset or error occurs.
+    - Validates request body
+    - Supports use_fallback flag for instantaneous, zero-network live pitches
+    - Executes Round 1 (Parallel - 4 agents)
+    - Executes Round 2 (Parallel - 4 agents)
+    - Executes Round 3 (Head Jurist synthesis)
+    - Cleanly falls back to fallback_demo.json on total round failures or outages
     """
-    case_data = request.get_json() or {}
-    use_fallback = request.args.get("fallback", "").lower() in ["true", "1"]
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Invalid request body"}), 400
 
-    if use_fallback or not genai_client:
-        # Fallback path for hackathon stability
-        return jsonify(load_fallback_data()), 200
+    # Item 4: Demo Resilience — allow immediate fallback demo data if requested
+    if body.get("use_fallback") is True or request.args.get("fallback", "").lower() in ["true", "1"]:
+        fallback = load_fallback()
+        fallback["source"] = "fallback"
+        fallback["fallback_reason"] = "Explicit fallback requested by client"
+        return jsonify(fallback), 200
+
+    case_facts = body.get("case_facts")
+    if not case_facts or not isinstance(case_facts, str) or not case_facts.strip():
+        return jsonify({"error": "case_facts is required"}), 400
+
+    case_type = body.get("case_type", "general")
+    if not isinstance(case_type, str) or not case_type.strip():
+        case_type = "general"
+
+    case_facts = case_facts.strip()
+    case_type = case_type.strip()
 
     try:
-        # TODO (Teammate 2 & 3): Connect agents.py personas to genai_client
-        # ------------------------------------------------------------------
-        # ROUND 1: Generate initial opinions from the 4 primary jurors
-        # Example using SDK:
-        # response = genai_client.models.generate_content(
-        #     model=GEMINI_MODEL,
-        #     contents=prompt
-        # )
-        # ------------------------------------------------------------------
-        # ROUND 2: Feed Round 1 opinions back to 4 jurors for rebuttals
-        # ------------------------------------------------------------------
-        # ROUND 3: Lead Jurist synthesizes all discussions into advisory verdict
-        # ------------------------------------------------------------------
+        pipeline_start = time.time()
 
-        # Temporary placeholder returning fallback until live agent calls are finalized
-        return jsonify(load_fallback_data()), 200
+        # Round 1 — 4 jurors in parallel
+        round1_transcript = run_round1_parallel(case_facts, case_type)
+
+        # Round 2 — 4 jurors in parallel
+        round2_transcript = run_round2_parallel(case_facts, case_type, round1_transcript)
+
+        # Round 3 — Head Jurist single call
+        round3_prompt = build_round3_prompt(case_facts, round1_transcript, round2_transcript, case_type)
+        round3_result = call_gemini(round3_prompt, LEAD_CONFIG)
+
+        elapsed = round(time.time() - pipeline_start, 2)
+        print(f"[JuryX] Multi-agent deliberation completed in {elapsed}s")
+
+        # Format round_1_initial for React frontend App.jsx
+        round_1_initial = []
+        for juror in JURORS:
+            jid = juror["id"]
+            info = round1_transcript.get(jid, {})
+            round_1_initial.append({
+                "juror_id": jid,
+                "name": juror["name"],
+                "stance": info.get("stance", "N/A").replace("_", " ").title(),
+                "opinion": info.get("rationale", "")
+            })
+
+        # Format round_2_rebuttal for React frontend App.jsx
+        round_2_rebuttal = []
+        for juror in JURORS:
+            jid = juror["id"]
+            info = round2_transcript.get(jid, {})
+            rebuttals_list = info.get("rebuttals", [])
+            reb_summary = " ".join([r.get("argument", "") for r in rebuttals_list if isinstance(r, dict)])
+            opinion = f"{reb_summary} {info.get('revised_rationale', '')}".strip() or info.get("revised_rationale", "")
+            round_2_rebuttal.append({
+                "juror_id": jid,
+                "name": juror["name"],
+                "opinion": opinion
+            })
+
+        # Format round_3_synthesis for React frontend App.jsx
+        round_3_synthesis = {
+            "lead_jurist": HEAD_JUROR["name"],
+            "consensus_level": round3_result.get("consensus_level", "Majority Consensus").replace("_", " ").title(),
+            "advisory_verdict": round3_result.get("verdict", "Advisory Recommendation").replace("_", " ").title(),
+            "statutory_reference": ", ".join(round1_transcript.get("jurist", {}).get("statutory_references", ["Indian Judicial Summary Code"])),
+            "rationale": round3_result.get("advisory_note", ""),
+            "recommended_remedy": round3_result.get("remedy_or_sentencing", "")
+        }
+
+        return jsonify({
+            "source": "live",
+            "case_type": case_type,
+            # Dual-compatible schemas (evaluators & React frontend UI):
+            "round1": round1_transcript,
+            "round2": round2_transcript,
+            "round3": round3_result,
+            "round_1_initial": round_1_initial,
+            "round_2_rebuttal": round_2_rebuttal,
+            "round_3_synthesis": round_3_synthesis,
+            "pipeline_time_seconds": elapsed
+        }), 200
 
     except Exception as e:
-        print(f"Deliberation error: {e}. Reverting to fallback demo data.")
-        return jsonify(load_fallback_data()), 200
+        # Item 2: Clean fallback on ANY failure (including total round failure)
+        print(f"[JuryX] Pipeline exception: {e} — returning fallback demo data")
+        fallback = load_fallback()
+        fallback["source"] = "fallback"
+        fallback["fallback_reason"] = str(e)
+        return jsonify(fallback), 200
+
+
+@app.route("/api/eligibility", methods=["POST"])
+def eligibility():
+    """
+    Pure Python rule-based pre-screening for Indian summary trial eligibility.
+    Zero AI calls — applies BNSS, NI Act, and LASA rules deterministically.
+    """
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Invalid request body"}), 400
+
+    ELIGIBILITY_RULES = {
+        "cheque_dishonour": {
+            "compoundable": True,
+            "compounding_provision": "NI Act Sec 147",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 20 — Permanent Lok Adalat",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283",
+            "notes": "Compounding requires full payment of cheque amount. Lok Adalat preferred for amounts under Rs 20,00,000."
+        },
+        "theft": {
+            "compoundable": True,
+            "compounding_provision": "BNSS Sec 290 — First Schedule (BNS 303 compoundable with victim consent)",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 20",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — BNS 303 carries up to 3 years",
+            "notes": "Compounding only with permission of court and victim consent."
+        },
+        "traffic": {
+            "compoundable": True,
+            "compounding_provision": "MVA — designated traffic offences compoundable via e-challan",
+            "lok_adalat_eligible": False,
+            "lok_adalat_provision": "Not applicable — traffic fines are statutory fixed penalties",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — MVA offences generally under 3 years",
+            "notes": "Most traffic violations are compoundable on-spot or via motor accident claims tribunal."
+        },
+        "breach_of_trust": {
+            "compoundable": True,
+            "compounding_provision": "BNSS Sec 290 — First Schedule (BNS 316 compoundable with victim consent)",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 20",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — BNS 316 carries up to 3 years",
+            "notes": "Court permission required for compounding."
+        },
+        "cheating": {
+            "compoundable": True,
+            "compounding_provision": "BNSS Sec 290 — First Schedule (BNS 318 compoundable with victim consent)",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 20",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — BNS 318 carries up to 3 years",
+            "notes": "BNS 320 (cheating inducing delivery, up to 7 years) is NOT summarily triable."
+        },
+        "municipal": {
+            "compoundable": True,
+            "compounding_provision": "Respective municipal act — most municipal violations are compoundable",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 19 — Lok Adalat at district level",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — municipal offences generally under 3 years",
+            "notes": "Check specific municipal corporation act for compounding limits."
+        },
+        "general": {
+            "compoundable": None,
+            "compounding_provision": "Refer BNSS Sec 290 First Schedule for specific offence",
+            "lok_adalat_eligible": None,
+            "lok_adalat_provision": "LASA Sec 20 — subject to offence type",
+            "summary_trial_applicable": None,
+            "summary_trial_provision": "BNSS Sec 283 — applicable if offence carries up to 3 years",
+            "notes": "Cannot determine eligibility without specific case_type."
+        }
+    }
+
+    case_type = body.get("case_type", "general")
+    claim_amount = body.get("claim_amount", 0)
+
+    rules = ELIGIBILITY_RULES.get(case_type, ELIGIBILITY_RULES["general"])
+
+    response = {
+        "case_type": case_type,
+        "claim_amount": claim_amount,
+        "compoundable": rules["compoundable"],
+        "compounding_provision": rules["compounding_provision"],
+        "lok_adalat_eligible": rules["lok_adalat_eligible"],
+        "lok_adalat_provision": rules["lok_adalat_provision"],
+        "summary_trial_applicable": rules["summary_trial_applicable"],
+        "summary_trial_provision": rules["summary_trial_provision"],
+        "notes": rules["notes"],
+        "disclaimer": "This is a rule-based pre-screening output. It does not constitute legal advice."
+    }
+
+    if case_type == "cheque_dishonour":
+        if isinstance(claim_amount, (int, float)) and claim_amount > 0 and claim_amount <= 2000000:
+            response["lok_adalat_amount_check"] = "Eligible — claim within Permanent Lok Adalat limit of Rs 20,00,000"
+        elif isinstance(claim_amount, (int, float)) and claim_amount > 2000000:
+            response["lok_adalat_amount_check"] = "Review required — claim exceeds typical Permanent Lok Adalat limit"
+        else:
+            response["lok_adalat_amount_check"] = "Amount not provided — eligibility assumed"
+
+    return jsonify(response), 200
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    print(f"[JuryX] Starting server on port {port}")
+    print(f"[JuryX] Model: {GEMINI_MODEL}")
+    print(f"[JuryX] API key set: {bool(GEMINI_API_KEY)}")
+    print(f"[JuryX] Jurors loaded: {len(JURORS)}")
+    app.run(host="0.0.0.0", port=port, debug=debug)
