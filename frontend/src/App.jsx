@@ -1,226 +1,459 @@
-﻿import React, { useState } from 'react';
-import { SAMPLE_CASES } from './cases';
+import React, { useState, useEffect, useRef } from 'react';
+import Navbar from './components/Navbar';
+import CaseInput from './components/CaseInput';
+import JurorGrid from './components/JurorGrid';
+import DebateFeed from './components/DebateFeed';
+import VoteAnalytics from './components/VoteAnalytics';
+import FinalRecommendation from './components/FinalRecommendation';
+import MagistrateReview from './components/MagistrateReview';
+import AuditLog from './components/AuditLog';
+import LoadingState from './components/LoadingState';
+import { PRESET_CASES, JUROR_DEFINITIONS } from './data/cases';
+import { deliberateCase } from './services/api';
 
 export default function App() {
-  const [selectedCase, setSelectedCase] = useState(SAMPLE_CASES[0]);
-  const [deliberationData, setDeliberationData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [activeRound, setActiveRound] = useState('round_1');
+  // Navigation & View state: 'dashboard' | 'cases' | 'audit'
+  const [activeTab, setActiveTab] = useState('dashboard');
 
-  // Trigger deliberation (calls backend or fallback)
-  const handleDeliberate = async (useFallback = false) => {
-    setLoading(true);
-    try {
-      const url = useFallback ? '/api/deliberate?fallback=true' : '/api/deliberate';
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(selectedCase)
+  // Case Input states
+  const [caseTitle, setCaseTitle] = useState('');
+  const [caseDescription, setCaseDescription] = useState('');
+  const [evidenceDefence, setEvidenceDefence] = useState('');
+  const [selectedPresetId, setSelectedPresetId] = useState(null);
+
+  // Demo / Offline Mode toggle
+  const [offlineDemoMode, setOfflineDemoMode] = useState(false);
+
+  // Application Deliberation Lifecycle: 'idle' | 'analysing' | 'deliberating' | 'completed' | 'error'
+  const [appState, setAppState] = useState('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Deliberation Data returned by API
+  const [deliberationData, setDeliberationData] = useState(null);
+
+  // Progressive animation states for courtroom feed
+  const [visibleStatementCount, setVisibleStatementCount] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const animationTimerRef = useRef(null);
+
+  // Dynamic Juror Bench State (updates as statements are revealed!)
+  const [jurorStates, setJurorStates] = useState({
+    analyst: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+    empath: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+    jurist: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+    skeptic: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+  });
+  const [activeJurorId, setActiveJurorId] = useState(null);
+
+  // Magistrate Review State
+  const [reviewState, setReviewState] = useState(null);
+
+  // Pre-load the first preset case on mount for immediate ease of use
+  useEffect(() => {
+    const defaultCase = PRESET_CASES[0];
+    setSelectedPresetId(defaultCase.id);
+    setCaseTitle(defaultCase.title);
+    setCaseDescription(defaultCase.description);
+    setEvidenceDefence(`PROSECUTION EVIDENCE:\n${defaultCase.evidence}\n\nDEFENCE PLEA & MITIGATION:\n${defaultCase.defence}`);
+  }, []);
+
+  // Compute all statements flat list
+  const getAllStatements = (data) => {
+    if (!data || !data.rounds) return [];
+    const flat = [];
+    data.rounds.forEach((roundObj) => {
+      (roundObj.statements || []).forEach((stmt) => {
+        flat.push({
+          ...stmt,
+          round: roundObj.round || 1
+        });
       });
-      const data = await response.json();
-      setDeliberationData(data);
+    });
+    return flat;
+  };
+
+  // Synchronize Juror cards with visible statements as debate unfolds
+  const updateJurorStatesFromStatements = (statements, totalExpected) => {
+    const newStates = {
+      analyst: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      empath: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      jurist: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      skeptic: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+    };
+
+    statements.forEach((stmt) => {
+      const id = stmt.juror_id;
+      if (newStates[id]) {
+        newStates[id] = {
+          vote: stmt.vote,
+          confidence: stmt.confidence,
+          citedLaw: stmt.cited_law,
+          status: statements.length === totalExpected ? 'Completed' : 'Analysing'
+        };
+      }
+    });
+
+    JUROR_DEFINITIONS.forEach(j => {
+      if (!newStates[j.id].vote) {
+        newStates[j.id].status = statements.length > 0 ? 'Analysing' : 'Waiting';
+      }
+    });
+
+    setJurorStates(newStates);
+  };
+
+  // Start Deliberation Handler
+  const handleStartDeliberation = async () => {
+    const combinedCaseText = `TITLE: ${caseTitle}\n\nDESCRIPTION / FIR:\n${caseDescription}\n\nEVIDENCE & DEFENCE:\n${evidenceDefence}`;
+    
+    setAppState('analysing');
+    setErrorMessage('');
+    setDeliberationData(null);
+    setReviewState(null);
+    setVisibleStatementCount(0);
+    setIsAnimating(false);
+
+    setJurorStates({
+      analyst: { vote: null, confidence: 0, citedLaw: null, status: 'Analysing' },
+      empath: { vote: null, confidence: 0, citedLaw: null, status: 'Analysing' },
+      jurist: { vote: null, confidence: 0, citedLaw: null, status: 'Analysing' },
+      skeptic: { vote: null, confidence: 0, citedLaw: null, status: 'Analysing' },
+    });
+
+    try {
+      const result = await deliberateCase({
+        case_text: combinedCaseText,
+        use_fallback: offlineDemoMode
+      });
+
+      setDeliberationData(result);
+      const allStmts = getAllStatements(result);
+
+      if (allStmts.length === 0) {
+        setAppState('completed');
+        return;
+      }
+
+      setAppState('deliberating');
+      setIsAnimating(true);
+      let currentIdx = 0;
+
+      if (animationTimerRef.current) clearInterval(animationTimerRef.current);
+
+      animationTimerRef.current = setInterval(() => {
+        currentIdx += 1;
+        setVisibleStatementCount(currentIdx);
+
+        const currentVisible = allStmts.slice(0, currentIdx);
+        updateJurorStatesFromStatements(currentVisible, allStmts.length);
+
+        const latestStmt = allStmts[currentIdx - 1];
+        if (latestStmt) {
+          setActiveJurorId(latestStmt.juror_id);
+        }
+
+        if (currentIdx >= allStmts.length) {
+          clearInterval(animationTimerRef.current);
+          setIsAnimating(false);
+          setActiveJurorId(null);
+          setAppState('completed');
+
+          setJurorStates(prev => {
+            const finished = {};
+            Object.keys(prev).forEach(k => {
+              finished[k] = { ...prev[k], status: 'Completed' };
+            });
+            return finished;
+          });
+        }
+      }, 550);
+
     } catch (err) {
-      console.warn("Backend unavailable, loading local fallback structure", err);
-      // TODO (Teammate 4 & 5): Handle error display and retry
-    } finally {
-      setLoading(false);
+      console.error("Deliberation execution error:", err);
+      setAppState('error');
+      setErrorMessage(
+        err.message || "Failed to reach AI Deliberation API at http://localhost:5000. Ensure the Python Flask service is running, or toggle Offline Demo Mode to test immediately."
+      );
+      setJurorStates({
+        analyst: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+        empath: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+        jurist: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+        skeptic: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      });
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded bg-amber-500/20 border border-amber-500/40 flex items-center justify-center font-bold text-amber-400">
-            JX
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight">JuryX</h1>
-            <p className="text-xs text-slate-400">AI Advisory Jury Panel for Indian Summary Offences</p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-3 text-xs">
-          <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-            Hackathon Scaffold v0.1
-          </span>
-        </div>
-      </header>
+  const handleSkipAnimation = () => {
+    if (animationTimerRef.current) clearInterval(animationTimerRef.current);
+    if (!deliberationData) return;
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left Column: Case Selector & Facts */}
-        <section className="lg:col-span-4 flex flex-col space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">
-              Select Summary Case
-            </h2>
-            <div className="space-y-2">
-              {SAMPLE_CASES.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => { setSelectedCase(c); setDeliberationData(null); }}
-                  className={`w-full text-left p-3 rounded-lg border transition text-sm ${
-                    selectedCase.id === c.id
-                      ? 'border-amber-500/50 bg-amber-500/10 text-white font-medium'
-                      : 'border-slate-800 hover:border-slate-700 bg-slate-950/40 text-slate-300'
-                  }`}
+    const allStmts = getAllStatements(deliberationData);
+    setVisibleStatementCount(allStmts.length);
+    updateJurorStatesFromStatements(allStmts, allStmts.length);
+    setIsAnimating(false);
+    setActiveJurorId(null);
+    setAppState('completed');
+
+    setJurorStates(prev => {
+      const finished = {};
+      Object.keys(prev).forEach(k => {
+        finished[k] = { ...prev[k], status: 'Completed' };
+      });
+      return finished;
+    });
+  };
+
+  const handleClear = () => {
+    if (animationTimerRef.current) clearInterval(animationTimerRef.current);
+    setCaseTitle('');
+    setCaseDescription('');
+    setEvidenceDefence('');
+    setSelectedPresetId(null);
+    setDeliberationData(null);
+    setReviewState(null);
+    setVisibleStatementCount(0);
+    setIsAnimating(false);
+    setAppState('idle');
+    setErrorMessage('');
+    setJurorStates({
+      analyst: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      empath: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      jurist: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+      skeptic: { vote: null, confidence: 0, citedLaw: null, status: 'Waiting' },
+    });
+  };
+
+  const handleProceedToReview = () => {
+    const el = document.getElementById('magistrate-review-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Stepper logic: simple text with dots
+  const currentStep = 
+    appState === 'completed' || reviewState ? 4 :
+    appState === 'deliberating' && visibleStatementCount > 4 ? 2 :
+    appState === 'deliberating' || appState === 'analysing' ? 1 :
+    caseTitle ? 0 : -1;
+
+  const stepsList = [
+    "Case loaded",
+    "Round 1",
+    "Round 2",
+    "Head review",
+    "Advisory ready"
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#F7F7F8] text-[#111827] flex flex-col font-sans">
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        offlineDemoMode={offlineDemoMode}
+        setOfflineDemoMode={setOfflineDemoMode}
+        isDeliberating={appState === 'analysing' || appState === 'deliberating'}
+      />
+
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {/* Simple stepper with small dots */}
+        <div className="flex flex-wrap items-center justify-between gap-2 py-3 px-4 bg-white border border-[#E5E7EB] rounded-[8px] text-xs">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+            {stepsList.map((stepName, idx) => {
+              const isDone = idx < currentStep;
+              const isCur = idx === currentStep;
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${
+                    isCur ? 'bg-[#1F2A44] ring-2 ring-[#1F2A44]/20' :
+                    isDone ? 'bg-[#1F2A44]' : 'bg-[#E5E7EB]'
+                  }`} />
+                  <span className={`${
+                    isCur ? 'font-semibold text-[#111827]' :
+                    isDone ? 'text-[#111827]' : 'text-[#9CA3AF]'
+                  }`}>
+                    {stepName}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="text-[#4B5563]">
+            {appState === 'deliberating' && 'Deliberation in progress'}
+            {appState === 'completed' && 'Deliberation complete'}
+            {appState === 'idle' && 'Awaiting case input'}
+          </div>
+        </div>
+
+        {/* TAB 1: DASHBOARD */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            <CaseInput
+              caseTitle={caseTitle}
+              setCaseTitle={setCaseTitle}
+              caseDescription={caseDescription}
+              setCaseDescription={setCaseDescription}
+              evidenceDefence={evidenceDefence}
+              setEvidenceDefence={setEvidenceDefence}
+              onStartDeliberation={handleStartDeliberation}
+              onClear={handleClear}
+              isDeliberating={appState === 'analysing' || appState === 'deliberating'}
+              selectedPresetId={selectedPresetId}
+              setSelectedPresetId={setSelectedPresetId}
+              offlineDemoMode={offlineDemoMode}
+            />
+
+            {appState === 'error' && (
+              <div className="p-4 bg-[#FEF2F2] border border-[#FCA5A5] rounded-[8px] text-xs space-y-2">
+                <div className="font-semibold text-[#DC2626]">
+                  Connection Error
+                </div>
+                <p className="text-[#4B5563]">
+                  {errorMessage}
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={handleStartDeliberation}
+                    className="px-3 py-1 bg-[#DC2626] text-white rounded-[6px]"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOfflineDemoMode(true);
+                      setTimeout(() => handleStartDeliberation(), 100);
+                    }}
+                    className="px-3 py-1 bg-white border border-[#E5E7EB] text-[#111827] rounded-[6px]"
+                  >
+                    Switch to Demo Mode
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <JurorGrid
+              jurorStates={jurorStates}
+              isDeliberating={appState === 'analysing' || appState === 'deliberating'}
+              activeJurorId={activeJurorId}
+            />
+
+            {appState === 'analysing' && (
+              <LoadingState message="Convening AI Judicial Evaluators in Chamber..." />
+            )}
+
+            {(appState === 'deliberating' || appState === 'completed' || deliberationData) && (
+              <DebateFeed
+                rounds={deliberationData?.rounds || []}
+                visibleStatementCount={visibleStatementCount}
+                onSkipAnimation={handleSkipAnimation}
+                isAnimating={isAnimating}
+                isDeliberating={appState === 'deliberating'}
+              />
+            )}
+
+            {(appState === 'completed' || (deliberationData && !isAnimating)) && (
+              <VoteAnalytics
+                tally={deliberationData?.tally}
+                consensus={deliberationData?.consensus}
+                rounds={deliberationData?.rounds}
+              />
+            )}
+
+            {(appState === 'completed' || (deliberationData && !isAnimating)) && (
+              <FinalRecommendation
+                deliberationData={deliberationData}
+                onProceedToReview={handleProceedToReview}
+              />
+            )}
+
+            {(appState === 'completed' || (deliberationData && !isAnimating)) && (
+              <MagistrateReview
+                reviewState={reviewState}
+                onRecordReview={setReviewState}
+                onResetReview={() => setReviewState(null)}
+                consensus={deliberationData?.consensus}
+              />
+            )}
+
+            {(appState === 'completed' || deliberationData) && (
+              <AuditLog
+                caseTitle={caseTitle}
+                caseDescription={caseDescription}
+                evidenceDefence={evidenceDefence}
+                deliberationData={deliberationData}
+                reviewState={reviewState}
+              />
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: CASES */}
+        {activeTab === 'cases' && (
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-[8px] p-6 space-y-6">
+            <div>
+              <h2 className="text-base font-semibold text-[#111827]">
+                Benchmark Cases
+              </h2>
+              <p className="text-xs text-[#4B5563] mt-0.5">
+                Summary proceedings across Indian Penal Code / BNS, Negotiable Instruments Act, and Motor Vehicles Act.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {PRESET_CASES.map((preset) => (
+                <div 
+                  key={preset.id}
+                  className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-[8px] flex flex-col justify-between space-y-3"
                 >
-                  <div className="text-xs text-amber-400 font-mono mb-0.5">{c.id}</div>
-                  <div className="line-clamp-1">{c.title}</div>
-                </button>
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-medium text-[#1F2A44] bg-[#F7F7F8] px-2 py-0.5 rounded border border-[#E5E7EB]">
+                      {preset.tag}
+                    </span>
+                    <h3 className="text-sm font-semibold text-[#111827] pt-1">
+                      {preset.title}
+                    </h3>
+                    <p className="text-xs text-[#4B5563] line-clamp-3 leading-relaxed">
+                      {preset.description}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSelectedPresetId(preset.id);
+                      setCaseTitle(preset.title);
+                      setCaseDescription(preset.description);
+                      setEvidenceDefence(`PROSECUTION EVIDENCE:\n${preset.evidence}\n\nDEFENCE PLEA & MITIGATION:\n${preset.defence}`);
+                      setActiveTab('dashboard');
+                    }}
+                    className="w-full py-1.5 px-3 text-xs font-medium text-[#111827] bg-[#F7F7F8] hover:bg-[#E5E7EB] border border-[#E5E7EB] rounded-[8px] transition-colors"
+                  >
+                    Load into Docket
+                  </button>
+                </div>
               ))}
             </div>
           </div>
+        )}
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm flex-1">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              Case Brief
-            </h2>
-            <div className="text-xs text-slate-400 font-mono mb-2">{selectedCase.statute}</div>
-            <p className="text-sm text-slate-300 leading-relaxed mb-4">
-              {selectedCase.facts}
-            </p>
-            
-            <div className="pt-3 border-t border-slate-800">
-              <h3 className="text-xs font-semibold text-slate-400 mb-2">Advisory Focus:</h3>
-              <ul className="text-xs text-slate-300 space-y-1 list-disc list-inside">
-                {selectedCase.questions_for_jury.map((q, idx) => (
-                  <li key={idx}>{q}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="mt-6 flex flex-col gap-2">
-              <button
-                onClick={() => handleDeliberate(false)}
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-semibold text-sm transition disabled:opacity-50"
-              >
-                {loading ? "Deliberating..." : "Start 3-Round Deliberation"}
-              </button>
-              <button
-                onClick={() => handleDeliberate(true)}
-                disabled={loading}
-                className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition"
-              >
-                Load Instant Demo (Fallback)
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* Right Column: 3-Round Deliberation Panel */}
-        <section className="lg:col-span-8 flex flex-col space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm min-h-[500px] flex flex-col">
-            
-            {/* Round Navigation Tabs */}
-            <div className="flex items-center space-x-2 border-b border-slate-800 pb-3 mb-4">
-              <button
-                onClick={() => setActiveRound('round_1')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                  activeRound === 'round_1'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Round 1: Initial Stances (4 Jurors)
-              </button>
-              <button
-                onClick={() => setActiveRound('round_2')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                  activeRound === 'round_2'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Round 2: Rebuttal & Cross-Examination
-              </button>
-              <button
-                onClick={() => setActiveRound('round_3')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                  activeRound === 'round_3'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Round 3: Advisory Verdict (Lead Jurist)
-              </button>
-            </div>
-
-            {/* Deliberation Content View */}
-            {!deliberationData ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border border-dashed border-slate-800 rounded-lg">
-                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 text-xl mb-3">
-                  ⚖
-                </div>
-                <h3 className="text-sm font-semibold text-slate-300">Awaiting Deliberation</h3>
-                <p className="text-xs text-slate-500 max-w-sm mt-1">
-                  Click "Start 3-Round Deliberation" or "Load Instant Demo" to see the Analyst, Empath, Jurist, Skeptic, and Lead Jurist in action.
-                </p>
-              </div>
-            ) : (
-              <div className="flex-1 space-y-4">
-                {activeRound === 'round_1' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* TODO (Teammate 4 & 5): Enhance Juror card components */}
-                    {deliberationData.round_1_initial?.map((juror) => (
-                      <div key={juror.juror_id} className="p-4 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-sm text-amber-300">{juror.name}</span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                            {juror.stance}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-300 leading-relaxed">{juror.opinion}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {activeRound === 'round_2' && (
-                  <div className="space-y-3">
-                    {/* TODO (Teammate 4 & 5): Rebuttal dialogue thread layout */}
-                    {deliberationData.round_2_rebuttal?.map((juror) => (
-                      <div key={juror.juror_id} className="p-3.5 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <span className="font-semibold text-xs text-amber-400 block mb-1">{juror.name}</span>
-                        <p className="text-xs text-slate-300">{juror.opinion}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {activeRound === 'round_3' && deliberationData.round_3_synthesis && (
-                  <div className="p-5 rounded-lg bg-amber-950/20 border border-amber-600/30 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs uppercase font-bold text-amber-400 tracking-wider">
-                        {deliberationData.round_3_synthesis.lead_jurist} Advisory Summary
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        {deliberationData.round_3_synthesis.consensus_level}
-                      </span>
-                    </div>
-                    <div className="text-base font-semibold text-white">
-                      {deliberationData.round_3_synthesis.advisory_verdict}
-                    </div>
-                    <div className="text-xs text-slate-300 bg-slate-950/50 p-3 rounded border border-slate-800">
-                      <strong className="text-slate-200">Statutory Reference: </strong>
-                      {deliberationData.round_3_synthesis.statutory_reference}
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {deliberationData.round_3_synthesis.rationale}
-                    </p>
-                    <div className="text-xs text-amber-200 font-medium bg-amber-900/30 p-2.5 rounded border border-amber-700/40">
-                      Recommended Remedy: {deliberationData.round_3_synthesis.recommended_remedy}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
+        {/* TAB 3: AUDIT */}
+        {activeTab === 'audit' && (
+          <AuditLog
+            caseTitle={caseTitle}
+            caseDescription={caseDescription}
+            evidenceDefence={evidenceDefence}
+            deliberationData={deliberationData}
+            reviewState={reviewState}
+          />
+        )}
       </main>
+
+      <footer className="mt-auto py-5 border-t border-[#E5E7EB] bg-white text-center text-xs text-[#4B5563]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>JuryX · AI Judicial Decision Support System (Summary Courts)</span>
+          <span className="text-[11px] text-[#9CA3AF]">Human Oversight Mandate (Article 235)</span>
+        </div>
+      </footer>
     </div>
   );
 }
