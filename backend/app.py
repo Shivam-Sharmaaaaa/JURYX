@@ -480,6 +480,29 @@ def index():
     }), 200
 
 
+@app.route("/<path:filename>", methods=["GET"])
+def static_proxy(filename):
+    """Serves frontend static assets with resilient fallback for aliases and agent images."""
+    file_path = os.path.join(FRONTEND_DIR, filename)
+    if os.path.isfile(file_path):
+        return send_from_directory(FRONTEND_DIR, filename)
+
+    IMG_ALIASES = {
+        "analyst.jpg": "Golden Analyst Agent Emblem.png",
+        "empath.jpg": "Golden Empath Agent Emblem.png",
+        "jurist.jpg": "Golden Jurist Agent Emblem.png",
+        "skeptic.jpg": "Skeptic Agent Philosopher Emblem.png",
+        "head-agent.jpg": "head-agent.png",
+        "stylee.css": "style.css",
+        "scriptt.js": "script.js"
+    }
+    target = IMG_ALIASES.get(filename)
+    if target and os.path.isfile(os.path.join(FRONTEND_DIR, target)):
+        return send_from_directory(FRONTEND_DIR, target)
+
+    return jsonify({"error": f"Asset {filename} not found"}), 404
+
+
 # Item 4: Support both /health and /api/health
 @app.route("/health", methods=["GET"])
 @app.route("/api/health", methods=["GET"])

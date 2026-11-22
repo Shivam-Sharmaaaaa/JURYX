@@ -255,6 +255,65 @@ const DATA = {
       verdict: "Split (2 to 2)",
 
       summary: "The sample image may show a vehicle crossing a signal, but the driver is not identified in the supplied summary. A human reviewer should verify the original footage, signal log and applicable liability rules."
+    },
+
+    {
+      title: "Alleyway Assault & Brawl",
+      short: "BNS 115(2)",
+      fir: "FIR 1190/2025 PS Mangolpuri. Dharmveer alleges Pappu struck him on left shoulder and forehead with a steel bucket handle over a parked motorcycle. Pappu contends Dharmveer kicked bike over and fell against Delhi Jal Board water tanker frame during mutual scuffle.",
+      sections: "Bharatiya Nyaya Sanhita Section 115(2); BNSS Section 283 (Summary Trial) & Section 35(3)",
+      evidence: [
+        "MLC No. 4471: 1.5cm forehead laceration; ZERO shoulder injury/contusion",
+        "Sunita Devi (Neighbour): Heard metallic thud on tanker stand; saw bare-handed grapple with no weapon",
+        "Ramesh (Friend): Statement delayed 6 days; obstructed line-of-sight behind TSR at dusk",
+        "14-second mobile video by neighbor Aman unseized under Section 63 BSA"
+      ],
+      messages: [
+        {
+          juror: "Analyst",
+          vote: "Not Guilty",
+          text: "Forehead cut is verified on MLC No. 4471, but the complete absence of shoulder trauma contradicts an armed attack with a bucket handle. Section 63 BSA video was not seized."
+        },
+        {
+          juror: "Empath",
+          vote: "Not Guilty",
+          text: "Both parties are alley neighbours in Sultanpuri. The dispute arose over momentary parking. Compounding under Section 290 BNSS or Lok Adalat referral preserves harmony."
+        },
+        {
+          juror: "Jurist",
+          vote: "Not Guilty",
+          text: "Offence under Section 115(2) BNS is summarily triable u/s 283 BNSS and compoundable. Accidental impact during mutual fray negates intentional hurt."
+        },
+        {
+          juror: "Skeptic",
+          vote: "Not Guilty",
+          text: "Independent witness Sunita Devi confirms a metallic thud on the tanker frame with no weapon. Friend Ramesh delayed his statement by 6 days in dim dusk."
+        }
+      ],
+      checks: [
+        {
+          juror: "Analyst",
+          ok: false,
+          note: "MLC discrepancy (missing shoulder injury) and unseized BSA S.63 digital video create forensic doubts."
+        },
+        {
+          juror: "Empath",
+          ok: true,
+          note: "Compounding under Section 290 BNSS is restorative and recommended for co-residents."
+        },
+        {
+          juror: "Jurist",
+          ok: true,
+          note: "Procedural notice under Section 35(3) BNSS followed; matter eligible for Lok Adalat referral under LASA Sec 20."
+        },
+        {
+          juror: "Skeptic",
+          ok: false,
+          note: "Witness bias and delayed deposition of Ramesh render the prosecution narrative doubtful."
+        }
+      ],
+      verdict: "Compoundable / Acquittal on Reasonable Doubt (4 to 0)",
+      summary: "Panel emphasizes severe forensic inconsistency in MLC No. 4471 and independent corroboration of the tanker stand impact. Recommends compounding under Section 290 BNSS or acquittal on benefit of doubt."
     }
 
   ]
@@ -976,6 +1035,18 @@ const ROUND_TWO_TEXT = {
 
     Skeptic: "Round 2: The driver's identity remains unestablished in the supplied summary; vehicle ownership alone may not answer that question."
 
+  },
+
+  "Alleyway Assault & Brawl": {
+
+    Analyst: "Round 2: Forehead laceration is verified on MLC No. 4471, but the complete absence of shoulder trauma contradicts an armed attack with a bucket handle. The unseized Section 63 BSA video leaves material doubt.",
+
+    Empath: "Round 2: Dispute between Sultanpuri alleyway neighbours over momentary obstruction should be compounded u/s 290 BNSS with restitution for motorcycle repairs.",
+
+    Jurist: "Round 2: Charge u/s 115(2) BNS requires proof of intentional hurt. Accidental contact during mutual grappling fails to establish mens rea.",
+
+    Skeptic: "Round 2: Independent neighbour Sunita Devi's neutral deposition directly refutes weapon usage. Ramesh's 6-day delayed statement is compromised by bias and dusk lighting."
+
   }
 
 };
@@ -1630,6 +1701,85 @@ async function start() {
 
   const startTime = performance.now();
 
+  $("headStatus").textContent = "JuryX Legal Engine: Consulting Juror Agents…";
+
+  // Connect to live multi-agent backend if available
+  try {
+    const apiPayload = {
+      facts: current.fir || current.facts || ($("customFacts") ? $("customFacts").value : ""),
+      title: current.title,
+      case_type: current.short
+    };
+    const res = await fetch("/api/deliberate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(apiPayload)
+    });
+    if (res.ok) {
+      const liveData = await res.json();
+      if (liveData && liveData.round1 && liveData.round3) {
+        const r1 = liveData.round1;
+        const r2 = liveData.round2 || {};
+        const r3 = liveData.round3 || {};
+        const syn = liveData.round_3_synthesis || {};
+
+        const jurorMap = {
+          analyst: "Analyst",
+          empath: "Empath",
+          jurist: "Jurist",
+          skeptic: "Skeptic"
+        };
+
+        const liveMessagesR1 = [];
+        const liveChecks = [];
+        const followUps = {};
+
+        for (const [key, name] of Object.entries(jurorMap)) {
+          const j1 = r1[key] || {};
+          const j2 = r2[key] || {};
+          const rawStance = String(j1.stance || "needs_more_evidence").toLowerCase();
+          const vote = (rawStance === "guilty" || rawStance === "liable") ? "Guilty" : "Not Guilty";
+          const text = j1.rationale || "Evidence analyzed under designated statutory framework.";
+
+          liveMessagesR1.push({
+            juror: name,
+            vote: vote,
+            text: text
+          });
+
+          let rebNote = j2.revised_rationale || "Round 2: Re-evaluating stance against peer scrutiny.";
+          if (Array.isArray(j2.rebuttals) && j2.rebuttals.length > 0) {
+            const first = j2.rebuttals[0];
+            if (typeof first === "object" && first !== null) {
+              const targetStr = first.target_juror ? `To ${first.target_juror}: ` : "";
+              rebNote = `Round 2 (${targetStr}${first.argument || first.challenge || ""}) ${j2.revised_rationale || ""}`.trim();
+            }
+          }
+          followUps[name] = rebNote;
+
+          liveChecks.push({
+            juror: name,
+            ok: vote === "Guilty",
+            note: rebNote
+          });
+        }
+
+        current.messages = liveMessagesR1;
+        ROUND_TWO_TEXT[current.title] = followUps;
+        current.checks = liveChecks;
+        current.verdict = syn.advisory_verdict || String(r3.verdict || current.verdict).replace(/_/g, " ").toUpperCase();
+        const rem = syn.recommended_remedy || r3.remedy || "";
+        current.summary = `${syn.rationale || r3.advisory_note || current.summary} ${rem ? 'Recommended Action: ' + rem : ''}`.trim();
+
+        const ind = $("liveIndicator");
+        if (ind) {
+          ind.textContent = "Live Advisory Active (" + (liveData.source === "live" ? "Gemini Model" : "Verified Fallback") + ")";
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Live deliberation API unavailable; continuing with local demonstration data.", err);
+  }
 
   try {
 
