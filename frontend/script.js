@@ -1004,7 +1004,82 @@ async function start() {
   const startTime = performance.now();
 
   setStep(1);
-  $("headStatus").textContent = "Agents reviewing sample material";
+  $("headStatus").textContent = "JuryX Engine: Consulting Juror Agents…";
+
+  // Attempt live deliberation via backend API if available
+  try {
+    const apiPayload = {
+      facts: current.fir || current.facts || ($("customFacts") ? $("customFacts").value : ""),
+      title: current.title,
+      case_type: current.short
+    };
+    const res = await fetch("/api/deliberate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(apiPayload)
+    });
+    if (res.ok) {
+      const liveData = await res.json();
+      if (liveData && liveData.round1 && liveData.round3) {
+        const r1 = liveData.round1;
+        const r2 = liveData.round2 || {};
+        const r3 = liveData.round3 || {};
+        const syn = liveData.round_3_synthesis || {};
+
+        const jurorMap = {
+          analyst: "Analyst",
+          empath: "Empath",
+          jurist: "Jurist",
+          skeptic: "Skeptic"
+        };
+
+        const liveMessages = [];
+        const liveChecks = [];
+
+        for (const [key, name] of Object.entries(jurorMap)) {
+          const j1 = r1[key] || {};
+          const j2 = r2[key] || {};
+          const rawStance = String(j2.revised_stance || j1.stance || "needs_more_evidence").toLowerCase();
+          const vote = (rawStance === "guilty" || rawStance === "liable") ? "Guilty" : "Not Guilty";
+          const text = j1.rationale || "Evidence analyzed in designated legal domain.";
+
+          liveMessages.push({
+            juror: name,
+            vote: vote,
+            text: text
+          });
+
+          let rebNote = "Rebuttal reviewed.";
+          if (Array.isArray(j2.rebuttals) && j2.rebuttals.length > 0) {
+            const first = j2.rebuttals[0];
+            if (typeof first === "object" && first !== null) {
+              rebNote = first.challenge || first.argument || j2.revised_rationale || rebNote;
+            } else {
+              rebNote = String(first);
+            }
+          } else if (j2.revised_rationale) {
+            rebNote = j2.revised_rationale;
+          }
+
+          liveChecks.push({
+            juror: name,
+            ok: vote === "Guilty",
+            note: rebNote
+          });
+        }
+
+        current.messages = liveMessages;
+        current.checks = liveChecks;
+        current.verdict = syn.advisory_verdict || String(r3.verdict || current.verdict).replace(/_/g, " ").toUpperCase();
+        const rem = syn.recommended_remedy || r3.remedy || "";
+        current.summary = `${syn.rationale || r3.advisory_note || current.summary} ${rem ? 'Recommended Action: ' + rem : ''}`.trim();
+      }
+    }
+  } catch (err) {
+    console.warn("Live deliberation API unavailable; continuing with local demonstration data.", err);
+  }
+
+  $("headStatus").textContent = "Agents presenting initial findings";
 
   let guilty = 0;
   let notGuilty = 0;
