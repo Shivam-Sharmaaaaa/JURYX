@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -7,7 +6,12 @@
   <meta name="theme-color" content="#e5e5e5">
   <meta name="description" content="JuryX — multi-agent legal decision support with human oversight.">
   <title>JuryX | Legal Intelligence</title>
-
+  
+<link
+  rel="icon"
+  type="image/svg+xml"
+  href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23111'/%3E%3Ctext x='50' y='68' font-size='54' text-anchor='middle' fill='%23eee' font-family='Georgia'%3EJX%3C/text%3E%3C/svg%3E"
+>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&family=Cormorant+Garamond:wght@500;600;700&display=swap" rel="stylesheet">
@@ -361,7 +365,7 @@
 
     <article>
       <div class="portrait jurist">
-        <img src="Marble Jurist Emblem with Gavel and Scales.png " alt="Jurist portrait">
+        <img src="Marble Jurist Emblem with Gavel and Scales.png" alt="Jurist portrait">
         <b>J</b>
       </div>
       <small>03 / LEGAL FRAMEWORK</small>
@@ -435,7 +439,7 @@
 
         <div class="cases" id="cases"></div>
 
-        <!-- NEW: PDF UPLOAD -->
+        <!-- PDF UPLOAD -->
 
         <section class="pdf-upload" id="pdfUploadPanel">
           <div class="pdf-upload-icon">PDF</div>
@@ -518,7 +522,8 @@
 
         <ol class="stepper" id="steps">
           <li>Case loaded</li>
-          <li>Agents debate</li>
+          <li>Round 1</li>
+          <li>Round 2</li>
           <li>Head review</li>
           <li>Advisory ready</li>
         </ol>
@@ -533,33 +538,33 @@
 
         <div class="bench" id="bench">
           <div class="av" data-j="Analyst">
-            <b><img src="./analyst.jpg" alt="Analyst"><span>A</span></b>
+            <b><img src="./Analyst Emblem_ Law, Books, and Scales.png" alt="Analyst" onerror="this.style.display='none'"><span>A</span></b>
             <strong>Analyst</strong>
             <small>Evidence</small>
           </div>
 
           <div class="av" data-j="Empath">
-            <b><img src="./empath.jpg" alt="Empath"><span>E</span></b>
+            <b><img src="./Empath Marble Emblem with Quill and Scales.png" alt="Empath" onerror="this.style.display='none'"><span>E</span></b>
             <strong>Empath</strong>
             <small>Context</small>
           </div>
 
           <div class="av" data-j="Jurist">
-            <b><img src="./jurist.jpg" alt="Jurist"><span>J</span></b>
+            <b><img src="./Marble Jurist Emblem with Gavel and Scales.png" alt="Jurist" onerror="this.style.display='none'"><span>J</span></b>
             <strong>Jurist</strong>
             <small>Legal review</small>
           </div>
 
           <div class="av" data-j="Skeptic">
-            <b><img src="./skeptic.jpg" alt="Skeptic"><span>S</span></b>
+            <b><img src="./Skeptic’s Marble Scales Emblem.png" alt="Skeptic" onerror="this.style.display='none'"><span>S</span></b>
             <strong>Skeptic</strong>
             <small>Counterpoints</small>
           </div>
         </div>
 
         <div class="run-row">
-          <button id="startBtn" class="btn primary">Start deliberation →</button>
-          <small id="liveIndicator">Connected to Live JuryX Advisory Engine</small>
+          <button id="startBtn" class="btn primary">Start 2-round deliberation →</button>
+          <small>Sample responses · No live AI connection</small>
         </div>
 
         <div class="output-grid" id="agentOutput">
@@ -609,6 +614,19 @@
 
           <div id="result" class="empty">
             The Head Agent advisory will appear here after deliberation.
+          </div>
+        </section>
+
+        <section class="round-history" id="roundHistorySection">
+          <div class="panel-title">
+            <div>
+              <b>Deliberation history</b>
+              <small>Review what each agent said and how positions changed across both rounds.</small>
+            </div>
+            <label>2 ROUNDS</label>
+          </div>
+          <div id="roundHistory" class="round-history-list" aria-live="polite">
+            <div class="empty">Round-by-round results will appear here after deliberation begins.</div>
           </div>
         </section>
 
@@ -713,8 +731,9 @@
 
 <!-- AGENT SPOTLIGHT -->
 
-<div class="spot" id="spot" hidden>
-  <div class="spot-card" id="spotCard" role="dialog" aria-modal="true" aria-label="Agent statement">
+<div class="spot" id="spot" hidden aria-live="polite">
+  <div class="spot-card" id="spotCard" role="status" aria-label="Current agent update">
+    <small class="spot-round" id="spotRound">ROUND 1 · INITIAL REVIEW</small>
     <div class="spot-avatar">
       <span id="spotAv">A</span>
       <img id="spotImage" alt="">
@@ -722,7 +741,7 @@
     <p id="spotName"></p>
     <h3 id="spotVerdict" hidden></h3>
     <p id="spotMsg" aria-live="polite"></p>
-    <small>Click anywhere or press Esc to continue</small>
+    <small class="spot-hint">Agent update · saved in deliberation history · press Esc to skip</small>
   </div>
 </div>
 
