@@ -635,8 +635,106 @@ def build_round3_prompt(
     )
 
 
+# =====================================================================
+# CONTRACT EXPORTS REQUIRED BY app.py
+# =====================================================================
+
+JURORS = [
+    {
+        "id": "analyst",
+        "name": AGENTS["analyst"]["name"],
+        "role": AGENTS["analyst"]["role"],
+        "system_prompt": (
+            f"You are {AGENTS['analyst']['name']}, {AGENTS['analyst']['role']} on the JuryX advisory panel. "
+            f"Focus: {AGENTS['analyst']['focus']}. Tone: {AGENTS['analyst']['tone']}. "
+            f"Domain Boundary: {AGENTS['analyst']['domain_boundary']}"
+        ),
+    },
+    {
+        "id": "empath",
+        "name": AGENTS["empath"]["name"],
+        "role": AGENTS["empath"]["role"],
+        "system_prompt": (
+            f"You are {AGENTS['empath']['name']}, {AGENTS['empath']['role']} on the JuryX advisory panel. "
+            f"Focus: {AGENTS['empath']['focus']}. Tone: {AGENTS['empath']['tone']}. "
+            f"Domain Boundary: {AGENTS['empath']['domain_boundary']}"
+        ),
+    },
+    {
+        "id": "jurist",
+        "name": AGENTS["jurist"]["name"],
+        "role": AGENTS["jurist"]["role"],
+        "system_prompt": (
+            f"You are {AGENTS['jurist']['name']}, {AGENTS['jurist']['role']} on the JuryX advisory panel. "
+            f"Focus: {AGENTS['jurist']['focus']}. Tone: {AGENTS['jurist']['tone']}. "
+            f"Domain Boundary: {AGENTS['jurist']['domain_boundary']}"
+        ),
+    },
+    {
+        "id": "skeptic",
+        "name": AGENTS["skeptic"]["name"],
+        "role": AGENTS["skeptic"]["role"],
+        "system_prompt": (
+            f"You are {AGENTS['skeptic']['name']}, {AGENTS['skeptic']['role']} on the JuryX advisory panel. "
+            f"Focus: {AGENTS['skeptic']['focus']}. Tone: {AGENTS['skeptic']['tone']}. "
+            f"Domain Boundary: {AGENTS['skeptic']['domain_boundary']}"
+        ),
+    },
+]
+
+HEAD_JUROR = {
+    "id": "lead_jurist",
+    "name": AGENTS["lead_jurist"]["name"],
+    "role": AGENTS["lead_jurist"]["role"],
+    "system_prompt": (
+        f"You are {AGENTS['lead_jurist']['name']}, {AGENTS['lead_jurist']['role']} of the JuryX advisory panel. "
+        f"Focus: {AGENTS['lead_jurist']['focus']}. Tone: {AGENTS['lead_jurist']['tone']}. "
+        f"Domain Boundary: {AGENTS['lead_jurist']['domain_boundary']}"
+    ),
+}
+
+SAMPLE_CASES = [
+    {
+        "id": "CASE-IN-2024-001",
+        "title": "Cheque Dishonour under Section 138 Negotiable Instruments Act",
+        "category": "cheque_dishonour",
+        "case_text": (
+            "Complainant M/s Sharma Traders supplied retail goods worth INR 45,000 to respondent Rajesh Verma. "
+            "A cheque dated 12-Jan-2024 drawn on SBI was dishonoured with remark 'Insufficient Funds'. "
+            "Statutory demand notice under Section 138(b) was dispatched via speed post on 20-Jan-2024 and delivered on 24-Jan-2024. "
+            "No repayment made within statutory 15-day period. Respondent claims delivery was damaged due to unseasonal rain and seeks installments."
+        ),
+    },
+    {
+        "id": "CASE-IN-2024-002",
+        "title": "Petty Shoplifting under Section 303 Bharatiya Nyaya Sanhita (BNS)",
+        "category": "theft",
+        "case_text": (
+            "Accused Sunil Kumar (age 21, daily-wage laborer) was apprehended outside a neighborhood department store "
+            "with baby formula milk packets worth INR 1,200 concealed under his coat. "
+            "CCTV footage corroborates the act. Accused has no prior criminal history and stated his infant was severely ill "
+            "and he had not found work for three consecutive days. Store owner lodged formal complaint under Section 303 BNS."
+        ),
+    },
+    {
+        "id": "CASE-IN-2024-003",
+        "title": "Dangerous Driving / Overloading under Motor Vehicles Act, 1988",
+        "category": "traffic",
+        "case_text": (
+            "Commercial mini-truck driven by Ramesh Yadav was stopped at an intersection checkpoint. "
+            "Vehicle was carrying cargo 1.8 tonnes in excess of registered Gross Vehicle Weight (Section 194 MVA) "
+            "and caught changing lanes abruptly without indicators (Section 184 MVA). "
+            "Driver claims logistics contractor compelled him to transport the extra load under threat of withholding monthly wages."
+        ),
+    },
+]
+
+
 __all__ = [
     "AGENTS",
+    "JURORS",
+    "HEAD_JUROR",
+    "SAMPLE_CASES",
     "LEGAL_REFERENCE_BANK",
     "CASE_TYPE_ACTS",
     "PRECEDENTS",
