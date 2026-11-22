@@ -409,18 +409,19 @@ def run_round2_parallel(case_facts: str, case_type: str, round1_transcript: dict
 
 def detect_case_type(body: dict, case_facts: str) -> str:
     """Auto-detects Indian summary trial case type from request attributes and text."""
-    raw_type = body.get("case_type")
-    if raw_type and isinstance(raw_type, str) and raw_type.strip() and raw_type.strip().lower() != "general":
-        return raw_type.strip().lower()
+    VALID_TYPES = {"cheque_dishonour", "theft", "traffic", "breach_of_trust", "cheating", "municipal", "assault"}
+    raw_type = str(body.get("case_type") or "").strip().lower()
+    if raw_type in VALID_TYPES:
+        return raw_type
 
-    combined = f"{body.get('title', '')} {body.get('statute', '')} {case_facts}".lower()
+    combined = f"{raw_type} {body.get('title', '')} {body.get('statute', '')} {case_facts}".lower()
     if "138" in combined or "cheque" in combined or "dishonour" in combined:
         return "cheque_dishonour"
     elif "theft" in combined or "303" in combined or "stolen" in combined:
         return "theft"
-    elif "traffic" in combined or "mva" in combined or "driving" in combined or "281" in combined or "279" in combined:
+    elif "traffic" in combined or "mva" in combined or "driving" in combined or "281" in combined or "279" in combined or "119" in combined or "177" in combined:
         return "traffic"
-    elif "nuisance" in combined or "encroachment" in combined or "municipal" in combined:
+    elif "nuisance" in combined or "encroachment" in combined or "municipal" in combined or "290" in combined:
         return "municipal"
     elif "breach of trust" in combined or "316" in combined:
         return "breach_of_trust"

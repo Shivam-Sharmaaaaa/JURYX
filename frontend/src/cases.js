@@ -46,5 +46,20 @@ export const SAMPLE_CASES = [
       "Does late-night acoustic output qualify as actionable public nuisance in mixed-use zone?",
       "Can a mediated consent order resolve sidewalk blockage without business closure?"
     ]
+  },
+  {
+    id: "CASE-IN-2025-1190",
+    title: "Alleyway Brawl & Disputed Assault with Bucket Handle",
+    statute: "Bharatiya Nyaya Sanhita (BNS) Sec. 115(2) / BNSS Sec. 35(3) & 283",
+    court: "Judicial Magistrate First Class, Rohini Courts (Outer District), Delhi",
+    complainant: "Dharmveer (Injured, Sultanpuri)",
+    accused: "Pappu Chauhan (Carpenter, Sultanpuri)",
+    disputed_amount: "₹10,000 (Medical & Restitution Claim)",
+    facts: "Complainant alleges accused struck him on left shoulder and forehead with a steel bucket handle over a motorcycle blocking Gali No. 5. Accused contends complainant aggressively kicked bike over and fell against a Delhi Jal Board water tanker angle-iron frame during mutual scuffle. MLC records 1.5cm forehead laceration (simple blunt trauma) but ZERO shoulder injury. Independent neighbour Sunita Devi heard metallic thud against water stand and saw no weapon. Delayed witness Ramesh had obstructed view at dusk. IO failed to seize 14-second terrace mobile video under Section 63 BSA or recover any weapon.",
+    questions_for_jury: [
+      "Does the complete absence of shoulder injury on MLC No. 4471 create reasonable doubt regarding the use of a weapon?",
+      "Is the accused's accidental collision defence with the DJB water tanker frame substantiated by independent witness Sunita Devi?",
+      "Given investigative lapses under Section 63 BSA and the neighbourly nature of the dispute, is compounding under Section 290 BNSS or acquittal on benefit of doubt appropriate?"
+    ]
   }
 ];
