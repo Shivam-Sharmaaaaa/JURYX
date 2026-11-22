@@ -182,8 +182,13 @@ def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries
     Calls the Gemini API enforcing JSON output via response_mime_type="application/json".
     Includes exponential backoff retry for rate-limiting resilience.
     """
+    global client
     if client is None:
-        raise RuntimeError("No API key configured — set GEMINI_API_KEY in .env")
+        key = os.getenv("GEMINI_API_KEY")
+        if key:
+            client = genai.Client(api_key=key)
+        else:
+            raise RuntimeError("No API key configured — set GEMINI_API_KEY in .env")
 
     last_error = None
     for attempt in range(retries + 1):
@@ -205,8 +210,16 @@ def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries
                 cleaned = cleaned[3:]
             if cleaned.endswith("```"):
                 cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
 
-            return json.loads(cleaned.strip())
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    return json.loads(cleaned[start:end + 1])
+                raise
 
         except Exception as e:
             last_error = e
@@ -232,6 +245,19 @@ def load_fallback() -> dict:
             with open(FALLBACK_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 data["source"] = "fallback"
+                if "round_1_initial" not in data:
+                    data["round_1_initial"] = []
+                if "round_2_rebuttal" not in data:
+                    data["round_2_rebuttal"] = []
+                if "round_3_synthesis" not in data:
+                    data["round_3_synthesis"] = {
+                        "lead_jurist": "The Lead Jurist",
+                        "consensus_level": "Majority Consensus",
+                        "advisory_verdict": "Needs More Evidence",
+                        "statutory_reference": "Section 138 NI Act",
+                        "rationale": "Advisory synthesis unavailable.",
+                        "recommended_remedy": "Further inquiry required"
+                    }
                 return data
     except Exception as e:
         print(f"[JuryX] Error reading fallback file: {e}")
@@ -244,6 +270,16 @@ def load_fallback() -> dict:
         "round3": {
             "verdict": "needs_more_evidence",
             "advisory_note": "System fallback activated. Please retry."
+        },
+        "round_1_initial": [],
+        "round_2_rebuttal": [],
+        "round_3_synthesis": {
+            "lead_jurist": "The Lead Jurist",
+            "consensus_level": "N/A",
+            "advisory_verdict": "Needs More Evidence",
+            "statutory_reference": "N/A",
+            "rationale": "System fallback activated. Please retry.",
+            "recommended_remedy": "N/A"
         }
     }
 
@@ -272,7 +308,13 @@ def run_round1_parallel(case_facts: str, case_type: str) -> dict:
         for future in concurrent.futures.as_completed(future_to_agent):
             agent_id = future_to_agent[future]
             try:
-                round1_transcript[agent_id] = future.result(timeout=15)
+                res = future.result(timeout=30)
+                if isinstance(res, dict):
+                    norm_res = {k.lower(): v for k, v in res.items()}
+                    for k, v in norm_res.items():
+                        if k not in res:
+                            res[k] = v
+                round1_transcript[agent_id] = res
             except Exception as e:
                 failed_count += 1
                 print(f"[JuryX] Juror '{agent_id}' Round 1 failed: {e}")
@@ -313,7 +355,13 @@ def run_round2_parallel(case_facts: str, case_type: str, round1_transcript: dict
         for future in concurrent.futures.as_completed(future_to_agent):
             agent_id = future_to_agent[future]
             try:
-                round2_transcript[agent_id] = future.result(timeout=15)
+                res = future.result(timeout=30)
+                if isinstance(res, dict):
+                    norm_res = {k.lower(): v for k, v in res.items()}
+                    for k, v in norm_res.items():
+                        if k not in res:
+                            res[k] = v
+                round2_transcript[agent_id] = res
             except Exception as e:
                 failed_count += 1
                 print(f"[JuryX] Juror '{agent_id}' Round 2 failed: {e}")
@@ -328,6 +376,59 @@ def run_round2_parallel(case_facts: str, case_type: str, round1_transcript: dict
         raise RuntimeError("All jurors failed in Round 2 deliberation")
 
     return round2_transcript
+
+
+def detect_case_type(body: dict, case_facts: str) -> str:
+    """Auto-detects Indian summary trial case type from request attributes and text."""
+    raw_type = body.get("case_type")
+    if raw_type and isinstance(raw_type, str) and raw_type.strip() and raw_type.strip().lower() != "general":
+        return raw_type.strip().lower()
+
+    combined = f"{body.get('title', '')} {body.get('statute', '')} {case_facts}".lower()
+    if "138" in combined or "cheque" in combined or "dishonour" in combined:
+        return "cheque_dishonour"
+    elif "theft" in combined or "303" in combined or "stolen" in combined:
+        return "theft"
+    elif "traffic" in combined or "mva" in combined or "driving" in combined or "281" in combined or "279" in combined:
+        return "traffic"
+    elif "nuisance" in combined or "encroachment" in combined or "municipal" in combined:
+        return "municipal"
+    elif "breach of trust" in combined or "316" in combined:
+        return "breach_of_trust"
+    elif "cheating" in combined or "318" in combined:
+        return "cheating"
+    return "general"
+
+
+def _parse_amount(raw_val):
+    """Safely extracts a numeric float from int, float, or currency string e.g. '₹45,000'."""
+    if isinstance(raw_val, (int, float)):
+        return float(raw_val)
+    if isinstance(raw_val, str):
+        cleaned = "".join(c for c in raw_val if c.isdigit() or c == ".")
+        if cleaned:
+            try:
+                return float(cleaned)
+            except ValueError:
+                pass
+    return None
+
+
+def _format_rebuttal_entry(r) -> str:
+    """Formats an individual rebuttal entry across all schema iterations."""
+    if not isinstance(r, dict):
+        return str(r)
+    target = r.get("target_agent") or r.get("target_juror") or ""
+    chal = r.get("challenge") or r.get("argument") or ""
+    cntr = r.get("counter_point", "")
+    parts = []
+    if target:
+        parts.append(f"To {target}:")
+    if chal:
+        parts.append(chal)
+    if cntr:
+        parts.append(f"(Counter: {cntr})")
+    return " ".join(parts)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -368,7 +469,10 @@ def deliberate():
     """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
-        return jsonify({"error": "Invalid request body"}), 400
+        if request.form:
+            body = request.form.to_dict()
+        else:
+            return jsonify({"error": "Invalid request body"}), 400
 
     # Item 4: Demo Resilience — allow immediate fallback demo data if requested
     if body.get("use_fallback") is True or request.args.get("fallback", "").lower() in ["true", "1"]:
@@ -377,16 +481,12 @@ def deliberate():
         fallback["fallback_reason"] = "Explicit fallback requested by client"
         return jsonify(fallback), 200
 
-    case_facts = body.get("case_facts")
+    case_facts = body.get("case_facts") or body.get("facts")
     if not case_facts or not isinstance(case_facts, str) or not case_facts.strip():
-        return jsonify({"error": "case_facts is required"}), 400
-
-    case_type = body.get("case_type", "general")
-    if not isinstance(case_type, str) or not case_type.strip():
-        case_type = "general"
+        return jsonify({"error": "case_facts or facts is required"}), 400
 
     case_facts = case_facts.strip()
-    case_type = case_type.strip()
+    case_type = detect_case_type(body, case_facts)
 
     try:
         pipeline_start = time.time()
@@ -401,6 +501,39 @@ def deliberate():
         round3_prompt = build_round3_prompt(case_facts, round1_transcript, round2_transcript, case_type)
         round3_result = call_gemini(round3_prompt, LEAD_CONFIG)
 
+        if isinstance(round3_result, dict):
+            norm_r3 = {k.lower(): v for k, v in round3_result.items()}
+            for k, v in norm_r3.items():
+                if k not in round3_result:
+                    round3_result[k] = v
+
+        # Key normalization for cross-compatibility
+        if "remedy" in round3_result and "remedy_or_sentencing" not in round3_result:
+            round3_result["remedy_or_sentencing"] = round3_result["remedy"]
+        elif "remedy_or_sentencing" in round3_result and "remedy" not in round3_result:
+            round3_result["remedy"] = round3_result["remedy_or_sentencing"]
+
+        if "consensus_score" in round3_result and "consensus_level" not in round3_result:
+            score = round3_result["consensus_score"]
+            if score >= 100:
+                round3_result["consensus_level"] = "unanimous"
+            elif score >= 75:
+                round3_result["consensus_level"] = "majority_3_1"
+            elif score >= 50:
+                round3_result["consensus_level"] = "split_2_2"
+            else:
+                round3_result["consensus_level"] = "split_dissent"
+        elif "consensus_level" in round3_result and "consensus_score" not in round3_result:
+            lvl = str(round3_result["consensus_level"]).lower()
+            if "unanimous" in lvl or "4/4" in lvl:
+                round3_result["consensus_score"] = 100
+            elif "3_1" in lvl or "3/4" in lvl or "majority" in lvl:
+                round3_result["consensus_score"] = 75
+            elif "2_2" in lvl or "split" in lvl:
+                round3_result["consensus_score"] = 50
+            else:
+                round3_result["consensus_score"] = 25
+
         elapsed = round(time.time() - pipeline_start, 2)
         print(f"[JuryX] Multi-agent deliberation completed in {elapsed}s")
 
@@ -409,11 +542,13 @@ def deliberate():
         for juror in JURORS:
             jid = juror["id"]
             info = round1_transcript.get(jid, {})
+            raw_stance = str(info.get("stance") or "Needs More Evidence").replace("_", " ").title()
             round_1_initial.append({
                 "juror_id": jid,
-                "name": juror["name"],
-                "stance": info.get("stance", "N/A").replace("_", " ").title(),
-                "opinion": info.get("rationale", "")
+                "name": juror.get("name", jid.capitalize()),
+                "stance": raw_stance,
+                "confidence": info.get("confidence", 0),
+                "opinion": info.get("rationale") or info.get("opinion", "")
             })
 
         # Format round_2_rebuttal for React frontend App.jsx
@@ -422,22 +557,37 @@ def deliberate():
             jid = juror["id"]
             info = round2_transcript.get(jid, {})
             rebuttals_list = info.get("rebuttals", [])
-            reb_summary = " ".join([r.get("argument", "") for r in rebuttals_list if isinstance(r, dict)])
-            opinion = f"{reb_summary} {info.get('revised_rationale', '')}".strip() or info.get("revised_rationale", "")
+            reb_parts = [_format_rebuttal_entry(r) for r in rebuttals_list if r]
+            reb_summary = " ".join(reb_parts)
+            revised_rationale = info.get("revised_rationale") or info.get("rationale", "")
+            opinion = f"{reb_summary} {revised_rationale}".strip() or revised_rationale or "Stance maintained."
             round_2_rebuttal.append({
                 "juror_id": jid,
-                "name": juror["name"],
+                "name": juror.get("name", jid.capitalize()),
+                "revised_stance": str(info.get("revised_stance") or "Needs More Evidence").replace("_", " ").title(),
+                "revised_confidence": info.get("revised_confidence", 0),
                 "opinion": opinion
             })
 
         # Format round_3_synthesis for React frontend App.jsx
+        score_val = round3_result.get("consensus_score")
+        score_suffix = f" ({score_val}% Consensus)" if score_val is not None else ""
+        consensus_text = f"{str(round3_result.get('consensus_level', 'Majority Consensus')).replace('_', ' ').title()}{score_suffix}".strip()
+
+        stat_basis = round3_result.get("statutory_basis")
+        if isinstance(stat_basis, list) and stat_basis:
+            stat_reference = ", ".join(str(s) for s in stat_basis)
+        else:
+            jurist_refs = round1_transcript.get("jurist", {}).get("statutory_references", [])
+            stat_reference = ", ".join(str(s) for s in jurist_refs) if jurist_refs else "Indian Summary Trial Provisions"
+
         round_3_synthesis = {
-            "lead_jurist": HEAD_JUROR["name"],
-            "consensus_level": round3_result.get("consensus_level", "Majority Consensus").replace("_", " ").title(),
-            "advisory_verdict": round3_result.get("verdict", "Advisory Recommendation").replace("_", " ").title(),
-            "statutory_reference": ", ".join(round1_transcript.get("jurist", {}).get("statutory_references", ["Indian Judicial Summary Code"])),
-            "rationale": round3_result.get("advisory_note", ""),
-            "recommended_remedy": round3_result.get("remedy_or_sentencing", "")
+            "lead_jurist": HEAD_JUROR.get("name", "The Lead Jurist"),
+            "consensus_level": consensus_text,
+            "advisory_verdict": str(round3_result.get("verdict", "Advisory Recommendation")).replace("_", " ").title(),
+            "statutory_reference": stat_reference,
+            "rationale": round3_result.get("advisory_note") or round3_result.get("dissent_summary", ""),
+            "recommended_remedy": round3_result.get("remedy") or round3_result.get("remedy_or_sentencing", "")
         }
 
         return jsonify({
@@ -470,7 +620,10 @@ def eligibility():
     """
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
-        return jsonify({"error": "Invalid request body"}), 400
+        if request.form:
+            body = request.form.to_dict()
+        else:
+            return jsonify({"error": "Invalid request body"}), 400
 
     ELIGIBILITY_RULES = {
         "cheque_dishonour": {
@@ -538,8 +691,11 @@ def eligibility():
         }
     }
 
-    case_type = body.get("case_type", "general")
-    claim_amount = body.get("claim_amount", 0)
+    case_facts_text = body.get("case_facts") or body.get("facts") or ""
+    case_type = detect_case_type(body, case_facts_text)
+    raw_amount = body.get("claim_amount") if body.get("claim_amount") is not None else body.get("disputed_amount")
+    parsed_amount = _parse_amount(raw_amount)
+    claim_amount = parsed_amount if parsed_amount is not None else (raw_amount or 0)
 
     rules = ELIGIBILITY_RULES.get(case_type, ELIGIBILITY_RULES["general"])
 
@@ -557,9 +713,9 @@ def eligibility():
     }
 
     if case_type == "cheque_dishonour":
-        if isinstance(claim_amount, (int, float)) and claim_amount > 0 and claim_amount <= 2000000:
+        if parsed_amount is not None and 0 < parsed_amount <= 2000000:
             response["lok_adalat_amount_check"] = "Eligible — claim within Permanent Lok Adalat limit of Rs 20,00,000"
-        elif isinstance(claim_amount, (int, float)) and claim_amount > 2000000:
+        elif parsed_amount is not None and parsed_amount > 2000000:
             response["lok_adalat_amount_check"] = "Review required — claim exceeds typical Permanent Lok Adalat limit"
         else:
             response["lok_adalat_amount_check"] = "Amount not provided — eligibility assumed"

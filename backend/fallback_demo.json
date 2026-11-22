@@ -1,8 +1,102 @@
 {
-  "case_id": "CASE-IN-2024-001",
-  "title": "Cheque Dishonour under Section 138 Negotiable Instruments Act",
-  "summary": "M/s Sharma Traders v. Rajesh Verma for dishonoured cheque of INR 45,000 issued for small retail stock delivery.",
-  "status": "completed",
+  "source": "fallback",
+  "case_type": "cheque_dishonour",
+  "pipeline_time_seconds": 0.05,
+  "round1": {
+    "analyst": {
+      "stance": "liable",
+      "confidence": 0.85,
+      "rationale": "Bank memo confirms dishonour for 'Insufficient Funds'. Statutory 15-day notice was served via speed post with tracking. Prima facie strict liability under S.138 is substantiated by documentary trail.",
+      "statutory_references": [
+        "NI Act Sec 138",
+        "NI Act Sec 139"
+      ]
+    },
+    "empath": {
+      "stance": "compoundable",
+      "confidence": 0.7,
+      "rationale": "Respondent is a sole proprietor hit by local flooding during the delivery month. Immediate criminal conviction risks business closure; statutory compounding with an installment schedule is the most equitable remedy.",
+      "statutory_references": [
+        "NI Act Sec 147",
+        "LASA Sec 20"
+      ]
+    },
+    "jurist": {
+      "stance": "compoundable",
+      "confidence": 0.9,
+      "rationale": "Presumption under S.139 applies. As recognized by the Supreme Court in Meters and Instruments Pvt Ltd, S.138 is primarily a compensatory civil wrong with criminal coating. Settlement should be promoted.",
+      "statutory_references": [
+        "NI Act Sec 138",
+        "NI Act Sec 139",
+        "NI Act Sec 147"
+      ]
+    },
+    "skeptic": {
+      "stance": "needs_more_evidence",
+      "confidence": 0.6,
+      "rationale": "Examine if the cheque was given as security rather than for an existing legally enforceable debt. The delivery receipt lacks counter-signature by the accused.",
+      "statutory_references": [
+        "NI Act Sec 139",
+        "Indian Evidence Act Sec 118"
+      ]
+    }
+  },
+  "round2": {
+    "analyst": {
+      "rebuttals": [
+        {
+          "target_juror": "skeptic",
+          "argument": "Ledger statements match invoice #4092. The debt is liquidated and verifiable."
+        },
+        {
+          "target_juror": "empath",
+          "argument": "Installment plan is practical only if secured by initial 30% upfront deposit."
+        }
+      ],
+      "revised_stance": "liable",
+      "revised_confidence": 0.88,
+      "revised_rationale": "Documentary evidence confirms legally enforceable debt. Skeptic's security-cheque theory is unsupported absent a contemporaneous written agreement."
+    },
+    "empath": {
+      "rebuttals": [
+        {
+          "target_juror": "analyst",
+          "argument": "Accepting ledger validation, but criminal incarceration serves neither party. The complainant primarily needs liquidity, not retribution."
+        }
+      ],
+      "revised_stance": "compoundable",
+      "revised_confidence": 0.75,
+      "revised_rationale": "Factual liability established but restorative approach via compounding preserves both parties' commercial viability."
+    },
+    "jurist": {
+      "rebuttals": [
+        {
+          "target_juror": "skeptic",
+          "argument": "Security argument fails — signed cheque handed over in commercial transaction without formal dispute letter triggers S.139 presumption."
+        }
+      ],
+      "revised_stance": "compoundable",
+      "revised_confidence": 0.92,
+      "revised_rationale": "Under Section 147 NI Act, offences are compoundable at any stage. Court should actively facilitate settlement."
+    },
+    "skeptic": {
+      "rebuttals": [
+        {
+          "target_juror": "analyst",
+          "argument": "Conceding that the statutory notice timeline was met. Proceeding should be kept in abeyance pending mediation."
+        }
+      ],
+      "revised_stance": "compoundable",
+      "revised_confidence": 0.65,
+      "revised_rationale": "Reasonable doubt on security-cheque theory is diminished by ledger corroboration. Mediated settlement is the pragmatic path."
+    }
+  },
+  "round3": {
+    "verdict": "compounding_recommended",
+    "consensus_level": "majority_3_1",
+    "advisory_note": "All four jurors concur that the factual ingredients of Section 138 NI Act are satisfied. Three jurors (Empath, Jurist, Skeptic) explicitly recommend compounding. The Analyst confirms liability but conditions settlement on a 30% upfront deposit. Punitive imprisonment is counterproductive for a summary offence of this quantum (INR 45,000).",
+    "remedy_or_sentencing": "Direct respondent to pay principal INR 45,000 + 9% interest across 3 monthly installments via Lok Adalat mediation under NI Act Sec 147."
+  },
   "round_1_initial": [
     {
       "juror_id": "analyst",
@@ -15,21 +109,21 @@
       "juror_id": "empath",
       "name": "The Empath",
       "stance": "Mitigate / Compound",
-      "confidence": 0.70,
+      "confidence": 0.7,
       "opinion": "Respondent is a sole proprietor hit by local flooding during the delivery month. Immediate criminal conviction risks business closure; statutory compounding with an installment schedule is the most equitable remedy."
     },
     {
       "juror_id": "jurist",
       "name": "The Jurist",
       "stance": "Liable (Compoundable)",
-      "confidence": 0.90,
+      "confidence": 0.9,
       "opinion": "Presumption under S.139 applies. However, as recognized by the Supreme Court in Meters and Instruments Pvt Ltd, S.138 is primarily a compensatory civil wrong with criminal coating. Settlement should be promoted."
     },
     {
       "juror_id": "skeptic",
       "name": "The Skeptic",
       "stance": "Doubt / Dispute",
-      "confidence": 0.60,
+      "confidence": 0.6,
       "opinion": "Examine if the cheque was given as security rather than for an existing legally enforceable debt. The delivery receipt lacks counter-signature."
     }
   ],
