@@ -34,10 +34,11 @@ JuryX — Backend Server & Multi-Agent Deliberation Pipeline
 """
 
 import os
+import re
 import json
 import time
 import concurrent.futures
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -151,8 +152,9 @@ except ImportError:
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path)
 
-# Flask app initialization with CORS enabled
-app = Flask(__name__)
+# Flask app initialization with CORS enabled and static frontend serving
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 CORS(app)
 
 # Gemini Client and Model setup
@@ -177,10 +179,53 @@ LEAD_CONFIG = types.GenerateContentConfig(
 )
 
 
-def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries: int = 2) -> dict:
+def _parse_llm_json(raw: str) -> dict:
+    """
+    Robust JSON parser for LLM outputs:
+    1. Strips markdown fences (```json ... ```)
+    2. Strips illegal trailing commas before closing braces/brackets
+    3. Recovers JSON objects embedded inside conversational prose
+    """
+    cleaned = raw.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    # Step 1: Direct JSON parsing
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 2: Strip trailing commas (e.g. [1, 2,] or {"a": 1,})
+    no_trailing = re.sub(r",\s*([\]}])", r"\1", cleaned)
+    try:
+        return json.loads(no_trailing)
+    except json.JSONDecodeError:
+        pass
+
+    # Step 3: Extract from first '{' to last '}'
+    start = no_trailing.find("{")
+    end = no_trailing.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        inner = no_trailing[start:end + 1]
+        try:
+            return json.loads(inner)
+        except json.JSONDecodeError:
+            inner_clean = re.sub(r",\s*([\]}])", r"\1", inner)
+            return json.loads(inner_clean)
+
+    raise ValueError(f"Could not parse valid JSON from LLM response: {raw[:160]}")
+
+
+def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries: int = 3) -> dict:
     """
     Calls the Gemini API enforcing JSON output via response_mime_type="application/json".
-    Includes exponential backoff retry for rate-limiting resilience.
+    Includes exponential backoff retry for rate-limiting and temporary demand spikes (429, 503).
     """
     global client
     if client is None:
@@ -202,31 +247,15 @@ def call_gemini(prompt: str, config: types.GenerateContentConfig = None, retries
             if not raw:
                 raise ValueError("Empty response text from Gemini API")
 
-            # Defensive strip of markdown code fences if present
-            cleaned = raw
-            if cleaned.startswith("```json"):
-                cleaned = cleaned[7:]
-            elif cleaned.startswith("```"):
-                cleaned = cleaned[3:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
-
-            try:
-                return json.loads(cleaned)
-            except json.JSONDecodeError:
-                start = cleaned.find("{")
-                end = cleaned.rfind("}")
-                if start != -1 and end != -1 and end > start:
-                    return json.loads(cleaned[start:end + 1])
-                raise
+            return _parse_llm_json(raw)
 
         except Exception as e:
             last_error = e
             err_str = str(e).lower()
-            if "429" in err_str or "rate" in err_str or "quota" in err_str or "resource" in err_str:
-                wait_time = 2 ** attempt
-                print(f"[JuryX] Rate limit encountered (attempt {attempt + 1}/{retries + 1}), backing off {wait_time}s...")
+            transient_signals = ["429", "rate", "quota", "resource", "503", "unavailable", "demand", "overload", "500", "internal"]
+            if any(s in err_str for s in transient_signals) and attempt < retries:
+                wait_time = (2 ** attempt) + 0.5
+                print(f"[JuryX] Transient API issue encountered (attempt {attempt + 1}/{retries + 1}), backing off {wait_time}s...")
                 time.sleep(wait_time)
             else:
                 raise e
@@ -434,6 +463,19 @@ def _format_rebuttal_entry(r) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/", methods=["GET"])
+def index():
+    """Serves the frontend application."""
+    if os.path.exists(os.path.join(FRONTEND_DIR, "index.html")):
+        return send_from_directory(FRONTEND_DIR, "index.html")
+    return jsonify({
+        "service": "JuryX Deliberation API",
+        "status": "online",
+        "health": "/health",
+        "cases": "/api/cases"
+    }), 200
+
 
 # Item 4: Support both /health and /api/health
 @app.route("/health", methods=["GET"])
