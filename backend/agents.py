@@ -199,6 +199,117 @@ AGENTS = {
     },
 }
 
+# Ensure each agent has a synthesized system_prompt for backward compatibility
+for _k, _v in AGENTS.items():
+    if "system_prompt" not in _v:
+        _v["system_prompt"] = (
+            f"You are {_v.get('name')}, {_v.get('role')} on the JuryX advisory panel. "
+            f"Your focus is: {_v.get('focus')}. Your tone is: {_v.get('tone')}. "
+            f"Domain boundary: {_v.get('domain_boundary')}."
+        )
+
+# Backward & forward compatibility exports for app.py
+HEAD_JUROR = {
+    "id": "lead_jurist",
+    **AGENTS["lead_jurist"]
+}
+
+JURORS = [
+    {"id": k, **v}
+    for k, v in AGENTS.items()
+    if k != "lead_jurist"
+]
+
+# Standard sample cases matching Indian summary trial jurisdiction and frontend/src/cases.js
+SAMPLE_CASES = [
+    {
+        "id": "CASE-IN-2024-001",
+        "title": "Cheque Dishonour under Section 138 NI Act",
+        "case_type": "cheque_dishonour",
+        "statute": "Negotiable Instruments Act, 1881 (Sec. 138/147)",
+        "court": "Court of Metropolitan Magistrate (Special NI Act), Delhi",
+        "complainant": "M/s Sharma Wholesale Electricals",
+        "accused": "Rajesh Verma (Proprietor, Verma Electronics)",
+        "disputed_amount": "₹45,000",
+        "claim_amount": 45000,
+        "facts": "A cheque of ₹45,000 bounced due to 'Insufficient Funds'. Complainant served statutory 15-day notice via Speed Post. Accused claims cheque was handed as security deposit prior to seasonal supply which had defective goods, but lacks formal written rejection note.",
+        "case_facts": "A cheque of ₹45,000 bounced due to 'Insufficient Funds'. Complainant served statutory 15-day notice via Speed Post. Accused claims cheque was handed as security deposit prior to seasonal supply which had defective goods, but lacks formal written rejection note.",
+        "questions_for_jury": [
+            "Is the statutory presumption of debt under Section 139 rebutted?",
+            "Is compounding or Lok Adalat referral appropriate rather than custodial sentencing?",
+            "What reasonable installment or compensation schedule should be advised?"
+        ]
+    },
+    {
+        "id": "CASE-IN-2024-002",
+        "title": "Rash & Negligent Driving Causing Minor Hurt",
+        "case_type": "traffic",
+        "statute": "Bharatiya Nyaya Sanhita (BNS) Sec. 281 & 125(a) / IPC Sec. 279 & 337 / MVA Sec. 184",
+        "court": "Judicial Magistrate First Class, Bengaluru",
+        "complainant": "State / Sub-Inspector Traffic Division",
+        "accused": "Arun K. (Cab Driver)",
+        "disputed_amount": "₹15,000 (Medical Restitution Claim)",
+        "claim_amount": 15000,
+        "facts": "Accused's vehicle clipped a two-wheeler at a roundabout during evening peak hours. Victim sustained minor abrasions and bicycle damage. Accused contends visibility was impaired by broken municipal streetlights and erratic lane switching by the cyclist.",
+        "case_facts": "Accused's vehicle clipped a two-wheeler at a roundabout during evening peak hours. Victim sustained minor abrasions and bicycle damage. Accused contends visibility was impaired by broken municipal streetlights and erratic lane switching by the cyclist.",
+        "questions_for_jury": [
+            "Does the act meet the threshold of criminal rashness versus mere negligence?",
+            "Should this summary matter be disposed of with a fine and victim compensation?"
+        ]
+    },
+    {
+        "id": "CASE-IN-2024-003",
+        "title": "Public Nuisance & Commercial Encroachment",
+        "case_type": "municipal",
+        "statute": "BNS Sec. 290 / IPC Sec. 290 & Municipal Corporation Act",
+        "court": "Special Municipal Magistrate, Mumbai",
+        "complainant": "Resident Welfare Association (RWA), Bandra West",
+        "accused": "Gourmet Bites Cloud Kitchen",
+        "disputed_amount": "N/A (Injunctive & Fine)",
+        "claim_amount": 0,
+        "facts": "RWA alleges the cloud kitchen operates industrial exhaust blowers after 11 PM and blocks residential sidewalk with delivery bikes. Cloud kitchen asserts valid commercial trade license and willingness to install acoustic baffles.",
+        "case_facts": "RWA alleges the cloud kitchen operates industrial exhaust blowers after 11 PM and blocks residential sidewalk with delivery bikes. Cloud kitchen asserts valid commercial trade license and willingness to install acoustic baffles.",
+        "questions_for_jury": [
+            "Does late-night acoustic output qualify as actionable public nuisance in mixed-use zone?",
+            "Can a mediated consent order resolve sidewalk blockage without business closure?"
+        ]
+    },
+    {
+        "id": "CASE-IN-2024-004",
+        "title": "Petty Shop Theft of Mobile Accessory",
+        "case_type": "theft",
+        "statute": "Bharatiya Nyaya Sanhita (BNS) Sec. 303 / BNSS Sec. 283",
+        "court": "Judicial Magistrate First Class, Pune",
+        "complainant": "Chopra Electronics",
+        "accused": "Sunil Deshmukh",
+        "disputed_amount": "₹2,500",
+        "claim_amount": 2500,
+        "facts": "Accused was caught on CCTV slipping a ₹2,500 wireless earbud pack into his jacket at a retail electronics store. Accused is a first-time offender, a student aged 19, who offered immediate return and restitution upon apprehension by security.",
+        "case_facts": "Accused was caught on CCTV slipping a ₹2,500 wireless earbud pack into his jacket at a retail electronics store. Accused is a first-time offender, a student aged 19, who offered immediate return and restitution upon apprehension by security.",
+        "questions_for_jury": [
+            "Is summary compounding under BNSS Section 290 appropriate given victim restitution?",
+            "Should first-time student offender receive probation instead of custodial sentencing?"
+        ]
+    },
+    {
+        "id": "CASE-IN-2024-005",
+        "title": "Retention of Advance Cargo Transport Charges",
+        "case_type": "breach_of_trust",
+        "statute": "Bharatiya Nyaya Sanhita (BNS) Sec. 316 / BNSS Sec. 283",
+        "court": "Chief Judicial Magistrate, Ahmedabad",
+        "complainant": "Gujarat Agri Traders",
+        "accused": "Patel Logistics Transport Co.",
+        "disputed_amount": "₹60,000",
+        "claim_amount": 60000,
+        "facts": "Complainant advanced ₹60,000 for inter-state grain transit. Carrier suffered mechanical breakdown en-route and goods spoiled. Carrier refused refund claiming force majeure due to road landslide, but failed to produce police or meteorological report.",
+        "case_facts": "Complainant advanced ₹60,000 for inter-state grain transit. Carrier suffered mechanical breakdown en-route and goods spoiled. Carrier refused refund claiming force majeure due to road landslide, but failed to produce police or meteorological report.",
+        "questions_for_jury": [
+            "Does failure to refund advance constitute criminal breach of trust under BNS Sec 316 or mere civil breach of contract?",
+            "Can Lok Adalat referral resolve disputed transit loss?"
+        ]
+    }
+]
+
 # =====================================================================
 # PART 5 — HELPER FUNCTIONS
 # =====================================================================
@@ -291,7 +402,17 @@ def format_round1_transcript(transcript: dict) -> str:
         rationale = data.get("rationale", "")
         refs = data.get("statutory_references") or []
         if refs:
-            refs_str = ", ".join(str(r) for r in refs)
+            refs_parts = []
+            for r in refs:
+                if isinstance(r, dict):
+                    act = r.get("act", "")
+                    sec = r.get("sec") or r.get("section", "")
+                    desc = r.get("desc") or r.get("description", "")
+                    parts = [p for p in [act, f"Sec {sec}" if sec else "", desc] if p]
+                    refs_parts.append(": ".join(parts) if parts else str(r))
+                else:
+                    refs_parts.append(str(r))
+            refs_str = ", ".join(refs_parts)
         else:
             refs_str = "None"
 
@@ -350,11 +471,16 @@ def format_round2_transcript(transcript: dict) -> str:
             lines.append("Rebuttals:")
             for r in rebuttals:
                 if isinstance(r, dict):
-                    raw_target = r.get("target_agent", "")
+                    raw_target = r.get("target_agent") or r.get("target_juror") or r.get("target", "")
                     target = AGENTS.get(raw_target, {}).get("name", raw_target)
-                    challenge = r.get("challenge", "")
-                    counter = r.get("counter_point", "")
-                    lines.append(f"  -> To {target}: {challenge} | Counter: {counter}")
+                    challenge = r.get("challenge") or r.get("argument") or r.get("point", "")
+                    counter = r.get("counter_point") or r.get("counter", "")
+                    if counter:
+                        lines.append(f"  -> To {target}: {challenge} | Counter: {counter}")
+                    elif challenge:
+                        lines.append(f"  -> To {target}: {challenge}")
+                    else:
+                        lines.append(f"  -> To {target}: (general challenge)")
                 else:
                     lines.append(f"  -> {r}")
         else:
@@ -491,6 +617,11 @@ def build_round2_prompt(
         f"{format_round1_transcript(round1_transcript)}"
     )
 
+    case_facts_block = (
+        "=== CASE FACTS ===\n"
+        f"{case_facts}"
+    )
+
     task_block = (
         "Challenge at least 2 other jurors by their display name (e.g. The Jurist, The Empath).\n"
         "Identify specific flaws: incorrect statutory interpretation, overlooked evidence,\n"
@@ -522,7 +653,7 @@ def build_round2_prompt(
         "}"
     )
 
-    return f"{persona_block}\n\n{law_block}\n\n{context_block}\n\n{round1_block}\n\n{task_block}\n\n{output_instruction}"
+    return f"{persona_block}\n\n{law_block}\n\n{context_block}\n\n{case_facts_block}\n\n{round1_block}\n\n{task_block}\n\n{output_instruction}"
 
 
 def build_round3_prompt(
@@ -637,6 +768,9 @@ def build_round3_prompt(
 
 __all__ = [
     "AGENTS",
+    "JURORS",
+    "HEAD_JUROR",
+    "SAMPLE_CASES",
     "LEGAL_REFERENCE_BANK",
     "CASE_TYPE_ACTS",
     "PRECEDENTS",
