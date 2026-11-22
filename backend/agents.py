@@ -72,6 +72,7 @@ LEGAL_REFERENCE_BANK = {
         "147": "Compounding of offences permitted",
     },
     "BNS": {
+        "115(2)": "Voluntarily causing hurt — up to 1 year or fine up to Rs 10,000",
         "303": "Theft — up to 3 years or fine",
         "304": "Theft in dwelling — up to 7 years",
         "305": "Theft by servant — up to 7 years",
@@ -87,6 +88,7 @@ LEGAL_REFERENCE_BANK = {
     },
     "BNSS": {
         "2(1)(x)": "Definition of summary trial",
+        "35(3)": "Notice of appearance in lieu of arrest for offences under 7 years",
         "283": "Offences up to 3 years triable summarily",
         "284": "Procedure for summary trials",
         "285": "Record in summary trials",
@@ -149,6 +151,7 @@ CASE_TYPE_ACTS = {
     "breach_of_trust":  ["BNS", "BNSS", "BSA"],
     "cheating":         ["BNS", "BNSS", "BSA"],
     "municipal":        ["BNSS", "Constitution of India", "LASA"],
+    "assault":          ["BNS", "BNSS", "BSA", "Constitution of India", "LASA"],
     "general":          list(LEGAL_REFERENCE_BANK.keys()),
 }
 
@@ -306,6 +309,24 @@ SAMPLE_CASES = [
         "questions_for_jury": [
             "Does failure to refund advance constitute criminal breach of trust under BNS Sec 316 or mere civil breach of contract?",
             "Can Lok Adalat referral resolve disputed transit loss?"
+        ]
+    },
+    {
+        "id": "CASE-IN-2025-1190",
+        "title": "Alleyway Brawl & Disputed Assault with Bucket Handle",
+        "case_type": "assault",
+        "statute": "Bharatiya Nyaya Sanhita (BNS) Sec. 115(2) / BNSS Sec. 35(3) & 283",
+        "court": "Judicial Magistrate First Class, Rohini Courts (Outer District), Delhi",
+        "complainant": "Dharmveer (Injured, Sultanpuri)",
+        "accused": "Pappu Chauhan (Carpenter, Sultanpuri)",
+        "disputed_amount": "₹10,000 (Medical & Restitution Claim)",
+        "claim_amount": 10000,
+        "facts": "Complainant alleges accused struck him on left shoulder and forehead with a steel bucket handle over a motorcycle blocking Gali No. 5. Accused contends complainant aggressively kicked bike over and fell against a Delhi Jal Board water tanker angle-iron frame during mutual scuffle. MLC records 1.5cm forehead laceration (simple blunt trauma) but ZERO shoulder injury. Independent neighbour Sunita Devi heard metallic thud against water stand and saw no weapon. Delayed witness Ramesh had obstructed view at dusk. IO failed to seize 14-second terrace mobile video under Section 63 BSA or recover any weapon.",
+        "case_facts": "Complainant alleges accused struck him on left shoulder and forehead with a steel bucket handle over a motorcycle blocking Gali No. 5. Accused contends complainant aggressively kicked bike over and fell against a Delhi Jal Board water tanker angle-iron frame during mutual scuffle. MLC records 1.5cm forehead laceration (simple blunt trauma) but ZERO shoulder injury. Independent neighbour Sunita Devi heard metallic thud against water stand and saw no weapon. Delayed witness Ramesh had obstructed view at dusk. IO failed to seize 14-second terrace mobile video under Section 63 BSA or recover any weapon.",
+        "questions_for_jury": [
+            "Does the complete absence of shoulder injury on MLC No. 4471 create reasonable doubt regarding the use of a weapon?",
+            "Is the accused's accidental collision defence with the DJB water tanker frame substantiated by independent witness Sunita Devi?",
+            "Given investigative lapses under Section 63 BSA and the neighbourly nature of the dispute, is compounding under Section 290 BNSS or acquittal on benefit of doubt appropriate?"
         ]
     }
 ]

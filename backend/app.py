@@ -426,6 +426,8 @@ def detect_case_type(body: dict, case_facts: str) -> str:
         return "breach_of_trust"
     elif "cheating" in combined or "318" in combined:
         return "cheating"
+    elif "assault" in combined or "115" in combined or "hurt" in combined or "brawl" in combined:
+        return "assault"
     return "general"
 
 
@@ -721,6 +723,15 @@ def eligibility():
             "summary_trial_applicable": True,
             "summary_trial_provision": "BNSS Sec 283 — municipal offences generally under 3 years",
             "notes": "Check specific municipal corporation act for compounding limits."
+        },
+        "assault": {
+            "compoundable": True,
+            "compounding_provision": "BNSS Sec 290 — First Schedule (BNS 115(2) compoundable by person hurt)",
+            "lok_adalat_eligible": True,
+            "lok_adalat_provision": "LASA Sec 20 — compoundable summary dispute",
+            "summary_trial_applicable": True,
+            "summary_trial_provision": "BNSS Sec 283 — BNS 115(2) carries up to 1 year / fine",
+            "notes": "Offence under BNS 115(2) is compoundable without court permission by the injured party under BNSS Sec 290."
         },
         "general": {
             "compoundable": None,
